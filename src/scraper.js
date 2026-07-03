@@ -29,6 +29,7 @@ export async function runScraper(config) {
           }
         });
         const { summary } = await saveScrapedOrders(scraper, orders, {
+          currency: config.dashboard.currency,
           storeDate,
           scrapeMeta: {
             pageLogs,

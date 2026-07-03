@@ -27,9 +27,10 @@ try {
   console.table(summary.groups.map((group) => ({
     utm_id: group.utmId,
     订单数量: group.orderCount,
-    订单总金额: formatMoney(group.totalAmount)
+    英镑金额: `£${formatMoney(group.totalAmount)}`,
+    美元估算: `$${formatMoney(group.totalAmount * Number(config.dashboard.currency?.rate ?? 1.336))}`
   })));
-  console.log(`合计：店铺端今天 ${summary.totals.orderCount} 单，识别到 utm_id ${summary.totals.recognizedOrders} 单，未识别 ${summary.totals.unrecognizedOrders} 单，订单总金额 ${formatMoney(summary.totals.totalAmount)}。`);
+  console.log(`合计：店铺端今天 ${summary.totals.orderCount} 单，识别到 utm_id ${summary.totals.recognizedOrders} 单，未识别 ${summary.totals.unrecognizedOrders} 单，订单总金额 £${formatMoney(summary.totals.totalAmount)} / $${formatMoney(summary.totals.totalAmount * Number(config.dashboard.currency?.rate ?? 1.336))}。`);
 } finally {
   await browser.close();
 }

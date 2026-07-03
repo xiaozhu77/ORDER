@@ -3,33 +3,42 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>实时订单 UTM 看板</title>
+    <title>实时订单指挥台</title>
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
     <main class="shell">
       <header class="topbar">
-        <div>
-          <h1>实时订单 UTM 看板</h1>
-          <p id="subtitle">等待数据</p>
+        <div class="brandBlock">
+          <div class="eyebrow"><span class="pulse"></span> LIVE ORDER INTEL</div>
+          <h1>实时订单指挥台</h1>
+          <p id="subtitle">等待数据同步</p>
         </div>
-        <div id="health" class="health">等待首次抓取</div>
+        <div id="health" class="health">
+          <span class="healthDot"></span>
+          <span>等待首次抓取</span>
+        </div>
       </header>
 
       <section class="metrics">
         <article>
+          <div class="metricIcon">#</div>
           <span>店铺端今日订单</span>
           <strong id="totalOrders">0</strong>
         </article>
         <article>
+          <div class="metricIcon">£</div>
           <span>订单总金额</span>
-          <strong id="totalAmount">0.00</strong>
+          <strong id="totalAmount">£0.00</strong>
+          <small id="totalUsd">$0.00</small>
         </article>
         <article>
+          <div class="metricIcon">ID</div>
           <span>已识别 / 未识别</span>
           <strong id="recognizedOrders">0 / 0</strong>
         </article>
         <article>
+          <div class="metricIcon">%</div>
           <span>识别率</span>
           <strong id="recognitionRate">0%</strong>
         </article>
@@ -38,8 +47,8 @@
       <section class="tableSection">
         <div class="sectionTitle">
           <div>
-            <h2>UTM ID 汇总</h2>
-            <p id="scrapeInfo">每 10 秒自动刷新页面数据</p>
+            <h2>UTM ID 火力分布</h2>
+            <p id="scrapeInfo">每 10 秒刷新前端数据</p>
           </div>
           <div class="sortControls">
             <button id="sortCount" class="active" type="button">订单数</button>
@@ -52,7 +61,7 @@
               <tr>
                 <th>UTM ID</th>
                 <th>订单数量</th>
-                <th>订单总金额</th>
+                <th>订单金额</th>
                 <th>最新订单时间</th>
                 <th>状态分布</th>
               </tr>

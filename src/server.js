@@ -60,6 +60,7 @@ async function ensureInitialSummary(summaryPath) {
       },
       groups: [],
       orders: [],
+      currency: config.dashboard.currency ?? {},
       scrapeMeta: {},
       health: {
         ok: false,

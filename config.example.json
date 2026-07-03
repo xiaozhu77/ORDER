@@ -2,7 +2,15 @@
   "dashboard": {
     "host": "127.0.0.1",
     "port": 8787,
-    "refreshSeconds": 10
+    "refreshSeconds": 10,
+    "currency": {
+      "source": "GBP",
+      "sourceSymbol": "£",
+      "target": "USD",
+      "targetSymbol": "$",
+      "rate": 1.336,
+      "rateLabel": "1 GBP = 1.336 USD"
+    }
   },
   "scraper": {
     "enabled": true,

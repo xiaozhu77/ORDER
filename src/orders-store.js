@@ -11,6 +11,7 @@ export async function saveScrapedOrders(scraperConfig, scrapedOrders, options = 
   await writeJson(scraperConfig.ordersOutputPath, scrapedOrders);
   await writeJson(scraperConfig.dashboardDataPath, {
     ...summary,
+    currency: options.currency ?? {},
     storeDate: options.storeDate ?? "",
     scrapeMeta: options.scrapeMeta ?? {},
     health: {
