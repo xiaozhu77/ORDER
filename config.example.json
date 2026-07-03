@@ -1,0 +1,34 @@
+{
+  "dashboard": {
+    "host": "127.0.0.1",
+    "port": 8787,
+    "refreshSeconds": 10
+  },
+  "scraper": {
+    "enabled": true,
+    "headless": false,
+    "intervalSeconds": 20,
+    "timezone": "Asia/Shanghai",
+    "storageStatePath": "data/auth-state.json",
+    "ordersOutputPath": "data/orders.json",
+    "dashboardDataPath": "public/data/summary.json",
+    "backend": {
+      "loginUrl": "https://example.com/admin/login",
+      "ordersUrl": "https://example.com/admin/orders",
+      "username": "",
+      "password": "",
+      "selectors": {
+        "usernameInput": "input[type=\"email\"]",
+        "passwordInput": "input[type=\"password\"]",
+        "loginButton": "button:has-text(\"登录\")",
+        "loggedInMarker": "table",
+        "orderRows": "table tbody tr",
+        "orderNumber": "[data-field=\"order-number\"]",
+        "createdAt": "[data-field=\"created-at\"]",
+        "amount": "[data-field=\"amount\"]",
+        "status": "[data-field=\"status\"]",
+        "landingUrl": "[data-field=\"landing-url\"]"
+      }
+    }
+  }
+}

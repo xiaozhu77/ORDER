@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>实时订单 UTM 看板</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <h1>实时订单 UTM 看板</h1>
+          <p id="subtitle">等待数据</p>
+        </div>
+        <div id="health" class="health">等待首次抓取</div>
+      </header>
+
+      <section class="metrics">
+        <article>
+          <span>店铺端今日订单</span>
+          <strong id="totalOrders">0</strong>
+        </article>
+        <article>
+          <span>订单总金额</span>
+          <strong id="totalAmount">0.00</strong>
+        </article>
+        <article>
+          <span>已识别 / 未识别</span>
+          <strong id="recognizedOrders">0 / 0</strong>
+        </article>
+        <article>
+          <span>识别率</span>
+          <strong id="recognitionRate">0%</strong>
+        </article>
+      </section>
+
+      <section class="tableSection">
+        <div class="sectionTitle">
+          <div>
+            <h2>UTM ID 汇总</h2>
+            <p id="scrapeInfo">每 10 秒自动刷新页面数据</p>
+          </div>
+          <div class="sortControls">
+            <button id="sortCount" class="active" type="button">订单数</button>
+            <button id="sortAmount" type="button">金额</button>
+          </div>
+        </div>
+        <div class="tableWrap">
+          <table>
+            <thead>
+              <tr>
+                <th>UTM ID</th>
+                <th>订单数量</th>
+                <th>订单总金额</th>
+                <th>最新订单时间</th>
+                <th>状态分布</th>
+              </tr>
+            </thead>
+            <tbody id="summaryRows">
+              <tr><td colspan="5">暂无数据</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

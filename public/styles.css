@@ -1,0 +1,194 @@
+:root {
+  color-scheme: light;
+  font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+  background: #f5f7fb;
+  color: #1c2430;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.shell {
+  width: min(1280px, calc(100vw - 32px));
+  margin: 0 auto;
+  padding: 28px 0 40px;
+}
+
+.topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 20px;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 28px;
+  font-weight: 700;
+}
+
+#subtitle,
+#scrapeInfo {
+  margin-top: 8px;
+  color: #5f6d7e;
+  font-size: 14px;
+}
+
+.health {
+  min-width: 180px;
+  border-radius: 8px;
+  padding: 10px 14px;
+  text-align: center;
+  background: #fff5df;
+  color: #8a5b00;
+  border: 1px solid #ead39b;
+}
+
+.health.ok {
+  background: #eaf7ef;
+  color: #1f6b3a;
+  border-color: #b8dfc4;
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.metrics article,
+.tableSection {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.metrics article {
+  padding: 18px;
+}
+
+.metrics span {
+  display: block;
+  color: #637083;
+  font-size: 13px;
+}
+
+.metrics strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 26px;
+}
+
+.sectionTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+h2 {
+  font-size: 18px;
+}
+
+.sortControls {
+  display: inline-flex;
+  border: 1px solid #d7dee8;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.sortControls button {
+  border: 0;
+  background: #ffffff;
+  color: #334155;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.sortControls button.active {
+  background: #1f2937;
+  color: #ffffff;
+}
+
+.tableWrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 860px;
+}
+
+th,
+td {
+  padding: 13px 18px;
+  text-align: left;
+  border-bottom: 1px solid #edf2f7;
+  vertical-align: top;
+}
+
+th {
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 600;
+  background: #f8fafc;
+}
+
+td {
+  font-size: 14px;
+}
+
+.unknown {
+  color: #9a3412;
+  font-weight: 600;
+}
+
+.statusPill {
+  display: inline-block;
+  margin: 0 6px 6px 0;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #eef2f7;
+  color: #334155;
+  font-size: 12px;
+}
+
+@media (max-width: 760px) {
+  .shell {
+    width: min(100vw - 20px, 1280px);
+    padding-top: 18px;
+  }
+
+  .topbar {
+    display: block;
+  }
+
+  .health {
+    margin-top: 14px;
+    text-align: left;
+  }
+
+  .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sectionTitle {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
