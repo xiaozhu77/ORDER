@@ -53,7 +53,35 @@ export function parseOrderDate(dateLike) {
   const value = String(dateLike ?? "").trim();
   if (!value) return null;
 
-  const normalized = value.replace(/^(\d{4})\/(\d{1,2})\/(\d{1,2})/, "$1-$2-$3");
+  const normalized = value
+    .replace(/^(\d{4})\/(\d{1,2})\/(\d{1,2})/, "$1-$2-$3")
+    .replace(" ", "T");
   const date = new Date(normalized);
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+export function formatDateInZone(date, timeZone = "Asia/Shanghai") {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(date);
+}
+
+export function formatDateTimeInZone(date, timeZone = "Asia/Shanghai") {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23"
+    }).formatToParts(date).map((part) => [part.type, part.value])
+  );
+
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
 }

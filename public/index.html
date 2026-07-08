@@ -20,11 +20,25 @@
         </div>
       </header>
 
+      <section class="dateSwitcherSection">
+        <div class="dateSwitcherHeader">
+          <span>店铺日期</span>
+          <strong id="selectedDateLabel">-</strong>
+        </div>
+        <div id="dateSwitcher" class="dateSwitcher"></div>
+      </section>
+
       <section class="metrics">
         <article>
           <div class="metricIcon">#</div>
-          <span>店铺端今日订单</span>
+          <span>所选日期订单</span>
           <strong id="totalOrders">0</strong>
+        </article>
+        <article>
+          <div class="metricIcon">60</div>
+          <span>最近60分钟订单</span>
+          <strong id="last60Orders">0</strong>
+          <small id="last60Amount">£0.00 / $0.00</small>
         </article>
         <article>
           <div class="metricIcon">£</div>
@@ -42,6 +56,30 @@
           <span>识别率</span>
           <strong id="recognitionRate">0%</strong>
         </article>
+      </section>
+
+      <section class="continuingSection">
+        <div class="sectionTitle">
+          <div>
+            <h2>双日持续出单 ID</h2>
+            <p id="continuingInfo">今天和昨天都有出单的 UTM ID</p>
+          </div>
+        </div>
+        <div id="continuingRows" class="continuingGrid">
+          <div class="emptyState">暂无数据</div>
+        </div>
+      </section>
+
+      <section class="chartSection">
+        <div class="sectionTitle">
+          <div>
+            <h2>UTM ID 日内订单曲线</h2>
+            <p id="chartInfo">点击任意 UTM ID 查看今天一天内的订单时间序列</p>
+          </div>
+        </div>
+        <div id="orderChart" class="chartBox">
+          <div class="emptyState">等待选择 UTM ID</div>
+        </div>
       </section>
 
       <section class="tableSection">

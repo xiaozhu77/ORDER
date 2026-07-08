@@ -9,7 +9,7 @@ const publicDir = path.join(rootDir, "public");
 
 export async function startServer(config) {
   const dashboard = config.dashboard;
-  await ensureInitialSummary(config.scraper.dashboardDataPath);
+  await ensureInitialSummary(config);
 
   const server = http.createServer(async (request, response) => {
     try {
@@ -42,8 +42,8 @@ export async function startServer(config) {
   return server;
 }
 
-async function ensureInitialSummary(summaryPath) {
-  const resolved = path.resolve(summaryPath);
+async function ensureInitialSummary(config) {
+  const resolved = path.resolve(config.scraper.dashboardDataPath);
   try {
     await fs.access(resolved);
   } catch {
@@ -51,6 +51,12 @@ async function ensureInitialSummary(summaryPath) {
     await fs.writeFile(resolved, JSON.stringify({
       generatedAt: new Date().toISOString(),
       date: "",
+      storeTimezone: config.scraper.storeTimezone ?? "America/Anchorage",
+      storeDate: "",
+      selectedDate: "",
+      availableDates: [],
+      yesterdayDate: "",
+      dailySummaries: {},
       totals: {
         orderCount: 0,
         totalAmount: 0,
@@ -59,6 +65,22 @@ async function ensureInitialSummary(summaryPath) {
         recognitionRate: 0
       },
       groups: [],
+      todayGroups: [],
+      yesterdayGroups: [],
+      continuingUtmIds: [],
+      continuingGroups: [],
+      last60Minutes: {
+        orderCount: 0,
+        totalAmount: 0,
+        utmIds: [],
+        groups: [],
+        byUtmId: {},
+        startAt: "",
+        endAt: "",
+        timeZone: config.scraper.storeTimezone ?? "America/Anchorage",
+        label: "店铺时间"
+      },
+      hourlyBuckets: [],
       orders: [],
       currency: config.dashboard.currency ?? {},
       scrapeMeta: {},

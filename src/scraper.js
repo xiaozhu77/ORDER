@@ -2,8 +2,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright";
 import { readJson, writeJson } from "./file-store.js";
-import { saveScrapedOrders } from "./orders-store.js";
-import { scrapeStoreTodayPages } from "./store-today.js";
+import { loadStoredOrders, saveIncrementalOrders, saveScrapedOrders } from "./orders-store.js";
+import { scrapeStoreIncremental, scrapeStoreRecentDays } from "./store-today.js";
 
 export async function runScraper(config) {
   const scraper = config.scraper;
@@ -22,21 +22,39 @@ export async function runScraper(config) {
       try {
         await gotoIgnoringAbort(page, backend.ordersUrl);
         const pageLogs = [];
-        const { orders, storeDate } = await scrapeStoreTodayPages(page, backend, {
-          log: (message) => {
-            pageLogs.push(message);
-            console.log(message);
-          }
-        });
-        const { summary } = await saveScrapedOrders(scraper, orders, {
+        const storedOrders = await loadStoredOrders(scraper);
+        const existingOrderNumbers = new Set(storedOrders.map((order) => String(order.orderNumber ?? "").trim()).filter(Boolean));
+        const scrapeResult = existingOrderNumbers.size
+          ? await scrapeStoreIncremental(page, backend, {
+            days: 7,
+            existingOrderNumbers,
+            storeTimezone: scraper.storeTimezone,
+            log: (message) => {
+              pageLogs.push(message);
+              console.log(message);
+            }
+          })
+          : await scrapeStoreRecentDays(page, backend, {
+            days: 7,
+            storeTimezone: scraper.storeTimezone,
+            log: (message) => {
+              pageLogs.push(message);
+              console.log(message);
+            }
+          });
+        const saveFn = existingOrderNumbers.size ? saveIncrementalOrders : saveScrapedOrders;
+        const { summary } = await saveFn(scraper, scrapeResult.orders, {
           currency: config.dashboard.currency,
-          storeDate,
+          storeDate: scrapeResult.storeDate,
+          yesterdayDate: scrapeResult.yesterdayDate,
           scrapeMeta: {
             pageLogs,
+            mode: existingOrderNumbers.size ? "incremental" : "full",
+            newOrders: scrapeResult.orders.length,
             durationMs: Date.now() - startedAt.getTime()
           }
         });
-        console.log(`[${startedAt.toLocaleString()}] 店铺端今天 ${summary.totals.orderCount} 单，金额 ${summary.totals.totalAmount}`);
+        console.log(`[${startedAt.toLocaleString()}] 店铺端今天 ${summary.totals.orderCount} 单，最近60分钟 ${summary.last60Minutes.orderCount} 单`);
       } catch (error) {
         await writeHealth(scraper.dashboardDataPath, false, error);
         console.error(`[${startedAt.toLocaleString()}] 抓取失败:`, error.message);

@@ -14,7 +14,9 @@ export async function readJson(filePath, fallback) {
 export async function writeJson(filePath, value) {
   const resolved = path.resolve(filePath);
   await fs.mkdir(path.dirname(resolved), { recursive: true });
-  await fs.writeFile(resolved, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  const temporaryPath = `${resolved}.${process.pid}.${Date.now()}.tmp`;
+  await fs.writeFile(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  await fs.rename(temporaryPath, resolved);
 }
 
 export async function ensureDir(filePath) {

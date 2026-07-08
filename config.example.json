@@ -17,6 +17,7 @@
     "headless": false,
     "intervalSeconds": 20,
     "timezone": "Asia/Shanghai",
+    "storeTimezone": "America/Anchorage",
     "storageStatePath": "data/auth-state.json",
     "ordersOutputPath": "data/orders.json",
     "dashboardDataPath": "public/data/summary.json",
@@ -28,7 +29,7 @@
       "selectors": {
         "usernameInput": "input[type=\"email\"]",
         "passwordInput": "input[type=\"password\"]",
-        "loginButton": "button:has-text(\"登录\")",
+        "loginButton": "button.el-button--primary",
         "loggedInMarker": "table",
         "orderRows": "table tbody tr",
         "orderNumber": "[data-field=\"order-number\"]",

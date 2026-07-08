@@ -1,4 +1,7 @@
 let sortBy = "count";
+let selectedUtmId = "";
+let selectedDate = "";
+let latestData = null;
 
 const fallbackCurrency = {
   sourceSymbol: "£",
@@ -13,8 +16,16 @@ const elements = {
   totalOrders: document.querySelector("#totalOrders"),
   totalAmount: document.querySelector("#totalAmount"),
   totalUsd: document.querySelector("#totalUsd"),
+  last60Orders: document.querySelector("#last60Orders"),
+  last60Amount: document.querySelector("#last60Amount"),
   recognizedOrders: document.querySelector("#recognizedOrders"),
   recognitionRate: document.querySelector("#recognitionRate"),
+  selectedDateLabel: document.querySelector("#selectedDateLabel"),
+  dateSwitcher: document.querySelector("#dateSwitcher"),
+  continuingInfo: document.querySelector("#continuingInfo"),
+  continuingRows: document.querySelector("#continuingRows"),
+  chartInfo: document.querySelector("#chartInfo"),
+  orderChart: document.querySelector("#orderChart"),
   summaryRows: document.querySelector("#summaryRows"),
   scrapeInfo: document.querySelector("#scrapeInfo"),
   sortCount: document.querySelector("#sortCount"),
@@ -23,6 +34,7 @@ const elements = {
 
 elements.sortCount.addEventListener("click", () => setSort("count"));
 elements.sortAmount.addEventListener("click", () => setSort("amount"));
+elements.dateSwitcher.addEventListener("click", handleDateClick);
 
 refresh();
 setInterval(refresh, 10000);
@@ -45,20 +57,32 @@ async function refresh() {
 }
 
 function render(data) {
-  const totals = data.totals ?? {};
+  latestData = data;
+  if (!selectedDate || !(data.dailySummaries?.[selectedDate])) {
+    selectedDate = data.selectedDate || data.storeDate || data.availableDates?.[0] || "";
+  }
+  const activeSummary = data.dailySummaries?.[selectedDate] ?? data;
+  const isCurrentDate = selectedDate === (data.selectedDate || data.storeDate);
+  const totals = activeSummary.totals ?? {};
   const health = data.health ?? {};
+  const last60 = isCurrentDate ? (activeSummary.last60Minutes ?? {}) : emptyLast60();
   const currency = { ...fallbackCurrency, ...(data.currency ?? {}) };
 
-  elements.subtitle.textContent = `${data.date || "店铺端今天"} · 更新时间 ${formatTime(data.generatedAt)} · ${currency.rateLabel}`;
+  elements.subtitle.textContent = `店铺端 ${selectedDate || "-"} · 店铺时区 ${data.storeTimezone || "America/Anchorage"} · 更新时间 ${formatTime(data.generatedAt)} · ${currency.rateLabel}`;
   setHealth(Boolean(health.ok), health.message || "等待首次抓取");
+  renderDateSwitcher(data.availableDates ?? [], data.selectedDate || data.storeDate);
   elements.totalOrders.textContent = totals.orderCount ?? 0;
   elements.totalAmount.textContent = moneyGbp(totals.totalAmount ?? 0, currency);
   elements.totalUsd.textContent = moneyUsd(totals.totalAmount ?? 0, currency);
+  elements.last60Orders.textContent = last60.orderCount ?? 0;
+  elements.last60Amount.textContent = `${moneyGbp(last60.totalAmount ?? 0, currency)} / ${moneyUsd(last60.totalAmount ?? 0, currency)}`;
   elements.recognizedOrders.textContent = `${totals.recognizedOrders ?? 0} / ${totals.unrecognizedOrders ?? 0}`;
   elements.recognitionRate.textContent = `${Math.round((totals.recognitionRate ?? 0) * 10000) / 100}%`;
-  elements.scrapeInfo.textContent = scrapeInfo(data);
+  elements.scrapeInfo.textContent = scrapeInfo(data, activeSummary, last60, isCurrentDate);
+  renderContinuing(activeSummary.continuingGroups ?? [], last60, currency);
+  renderOrderChart(data, activeSummary, selectedUtmId);
 
-  const groups = [...(data.groups ?? [])].sort((a, b) => {
+  const groups = [...(activeSummary.groups ?? [])].sort((a, b) => {
     if (sortBy === "amount") return b.totalAmount - a.totalAmount || b.orderCount - a.orderCount;
     return b.orderCount - a.orderCount || b.totalAmount - a.totalAmount;
   });
@@ -68,25 +92,194 @@ function render(data) {
     return;
   }
 
-  elements.summaryRows.innerHTML = groups.map((group, index) => `
-    <tr>
-      <td>
-        <div class="utmCell">
-          <span class="rank">${String(index + 1).padStart(2, "0")}</span>
-          <span class="${group.recognized ? "" : "unknown"}">${escapeHtml(group.utmId)}</span>
+  elements.summaryRows.innerHTML = groups.map((group, index) => {
+    const last60Group = last60.byUtmId?.[group.utmId];
+    return `
+      <tr>
+        <td>
+          <div class="utmCell">
+            <span class="rank">${String(index + 1).padStart(2, "0")}</span>
+            <button class="utmButton ${group.recognized ? "" : "unknown"}" data-utm-id="${escapeAttr(group.utmId)}" type="button">${escapeHtml(group.utmId)}</button>
+            ${last60Group ? `<span class="continueBadge">60m ${last60Group.orderCount}单</span>` : ""}
+          </div>
+        </td>
+        <td><strong>${group.orderCount}</strong></td>
+        <td>
+          <div class="moneyStack">
+            <strong>${moneyGbp(group.totalAmount, currency)}</strong>
+            <small>${moneyUsd(group.totalAmount, currency)}</small>
+          </div>
+        </td>
+        <td>${escapeHtml(group.latestOrderTime || "-")}</td>
+        <td>${renderStatus(group.statusCounts)}</td>
+      </tr>
+    `;
+  }).join("");
+  bindUtmButtons(elements.summaryRows);
+}
+
+function renderDateSwitcher(dates, currentDate) {
+  elements.selectedDateLabel.textContent = selectedDate || "-";
+  elements.dateSwitcher.innerHTML = dates.map((date) => {
+    const label = date === currentDate ? `${date} 今天` : date;
+    return `<button class="${date === selectedDate ? "active" : ""}" data-date="${escapeAttr(date)}" type="button">${escapeHtml(label)}</button>`;
+  }).join("");
+}
+
+function handleDateClick(event) {
+  const button = event.target.closest("[data-date]");
+  if (!button) return;
+  selectedDate = button.dataset.date;
+  if (latestData) render(latestData);
+}
+
+function renderContinuing(groups, last60, currency) {
+  elements.continuingInfo.textContent = `${groups.length} 个 UTM ID 所选日和前一日都有出单`;
+
+  if (!groups.length) {
+    elements.continuingRows.innerHTML = '<div class="emptyState">暂无数据</div>';
+    return;
+  }
+
+  elements.continuingRows.innerHTML = groups.map((group) => {
+    const cumulativeOrders = Number(group.todayOrderCount || 0) + Number(group.yesterdayOrderCount || 0);
+    return `
+      <article class="continuingCard">
+        <div class="continuingHead">
+          <button class="utmButton" data-utm-id="${escapeAttr(group.utmId)}" type="button">${escapeHtml(group.utmId)}</button>
+          <strong>店铺累计 ${cumulativeOrders}单</strong>
         </div>
-      </td>
-      <td><strong>${group.orderCount}</strong></td>
-      <td>
-        <div class="moneyStack">
-          <strong>${moneyGbp(group.totalAmount, currency)}</strong>
-          <small>${moneyUsd(group.totalAmount, currency)}</small>
+        <div class="continuingStats">
+          <div>
+            <span>所选日</span>
+            <strong>${group.todayOrderCount} 单</strong>
+            <small>${moneyGbp(group.todayTotalAmount, currency)} / ${moneyUsd(group.todayTotalAmount, currency)}</small>
+          </div>
+          <div>
+            <span>前一日</span>
+            <strong>${group.yesterdayOrderCount} 单</strong>
+            <small>${moneyGbp(group.yesterdayTotalAmount, currency)} / ${moneyUsd(group.yesterdayTotalAmount, currency)}</small>
+          </div>
         </div>
-      </td>
-      <td>${escapeHtml(group.latestOrderTime || "-")}</td>
-      <td>${renderStatus(group.statusCounts)}</td>
-    </tr>
-  `).join("");
+      </article>
+    `;
+  }).join("");
+  bindUtmButtons(elements.continuingRows);
+}
+
+function bindUtmButtons(root) {
+  root.querySelectorAll("[data-utm-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectedUtmId = button.dataset.utmId;
+      if (latestData) {
+        const activeSummary = latestData.dailySummaries?.[selectedDate] ?? latestData;
+        renderOrderChart(latestData, activeSummary, selectedUtmId);
+      }
+      focusOrderChart();
+    });
+  });
+}
+
+function focusOrderChart() {
+  elements.orderChart.scrollIntoView({
+    behavior: "smooth",
+    block: "center"
+  });
+  elements.orderChart.classList.remove("chartFocus");
+  window.setTimeout(() => elements.orderChart.classList.add("chartFocus"), 0);
+  window.setTimeout(() => elements.orderChart.classList.remove("chartFocus"), 1400);
+}
+
+function renderOrderChart(data, activeSummary, utmId) {
+  if (!utmId) {
+    elements.chartInfo.textContent = "点击任意 UTM ID 查看所选日期的订单时间序列";
+    elements.orderChart.innerHTML = '<div class="emptyState">等待选择 UTM ID</div>';
+    return;
+  }
+
+  const storeDate = activeSummary.date ?? selectedDate ?? "";
+  const orders = (activeSummary.orders ?? []).filter((order) => order.utmId === utmId);
+  const points = buildHourlySeries(orders);
+  const totalOrders = points.reduce((sum, point) => sum + point.count, 0);
+  const peak = points.reduce((best, point) => point.count > best.count ? point : best, points[0]);
+
+  elements.chartInfo.textContent = `${utmId} · 店铺端 ${storeDate || "今天"} · 共 ${totalOrders} 单 · 峰值 ${peak.label} / 北京 ${toBeijingHourLabel(peak.hour)} ${peak.count} 单`;
+
+  if (!orders.length) {
+    elements.orderChart.innerHTML = '<div class="emptyState">该 UTM ID 今天暂无订单</div>';
+    return;
+  }
+
+  elements.orderChart.innerHTML = lineChartSvg(points);
+}
+
+function buildHourlySeries(orders) {
+  const points = Array.from({ length: 24 }, (_, hour) => ({
+    hour,
+    label: `${String(hour).padStart(2, "0")}:00`,
+    beijingLabel: toBeijingHourLabel(hour),
+    count: 0
+  }));
+
+  for (const order of orders) {
+    const hour = Number(String(order.createdAt ?? "").slice(11, 13));
+    if (Number.isInteger(hour) && points[hour]) points[hour].count += 1;
+  }
+
+  return points;
+}
+
+function lineChartSvg(points) {
+  const width = 1040;
+  const height = 330;
+  const padding = { top: 24, right: 24, bottom: 70, left: 44 };
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
+  const maxCount = Math.max(...points.map((point) => point.count), 1);
+  const xStep = chartWidth / (points.length - 1);
+  const path = points.map((point, index) => {
+    const x = padding.left + index * xStep;
+    const y = padding.top + chartHeight - (point.count / maxCount) * chartHeight;
+    return `${index === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`;
+  }).join(" ");
+  const areaPath = `${path} L${padding.left + chartWidth},${padding.top + chartHeight} L${padding.left},${padding.top + chartHeight} Z`;
+
+  return `
+    <svg class="orderLineChart" viewBox="0 0 ${width} ${height}" role="img" aria-label="UTM ID 日内订单折线图">
+      <defs>
+        <linearGradient id="lineFill" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stop-color="#50d6ff" stop-opacity="0.28"></stop>
+          <stop offset="100%" stop-color="#50d6ff" stop-opacity="0.02"></stop>
+        </linearGradient>
+      </defs>
+      <line class="axis" x1="${padding.left}" y1="${padding.top + chartHeight}" x2="${padding.left + chartWidth}" y2="${padding.top + chartHeight}"></line>
+      <line class="axis" x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${padding.top + chartHeight}"></line>
+      <path class="lineArea" d="${areaPath}"></path>
+      <path class="linePath" d="${path}"></path>
+      ${points.map((point, index) => {
+        const x = padding.left + index * xStep;
+        const y = padding.top + chartHeight - (point.count / maxCount) * chartHeight;
+        const labelY = Math.max(14, y - 10);
+        return `
+          <g>
+            <circle class="linePoint" cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="${point.count ? 4 : 2.5}"></circle>
+            ${point.count ? `<text class="pointLabel" x="${x.toFixed(2)}" y="${labelY.toFixed(2)}">${point.count}</text>` : ""}
+            ${index % 3 === 0 ? `
+              <text class="xLabel" x="${x.toFixed(2)}" y="${height - 34}">店 ${point.label.slice(0, 2)}</text>
+              <text class="xLabel beijingLabel" x="${x.toFixed(2)}" y="${height - 14}">京 ${point.beijingLabel.slice(0, 2)}</text>
+            ` : ""}
+          </g>
+        `;
+      }).join("")}
+      <text class="yLabel" x="6" y="${padding.top + 4}">${maxCount}单</text>
+      <text class="yLabel" x="18" y="${padding.top + chartHeight}">0</text>
+    </svg>
+  `;
+}
+
+function toBeijingHourLabel(storeHour) {
+  const beijingHour = (Number(storeHour) + 16) % 24;
+  return `${String(beijingHour).padStart(2, "0")}:00`;
 }
 
 function setHealth(ok, message) {
@@ -94,12 +287,24 @@ function setHealth(ok, message) {
   elements.health.innerHTML = `<span class="healthDot"></span><span>${escapeHtml(message)}</span>`;
 }
 
-function scrapeInfo(data) {
+function scrapeInfo(data, activeSummary, last60, isCurrentDate) {
   const meta = data.scrapeMeta ?? {};
   const pages = Array.isArray(meta.pageLogs) ? meta.pageLogs.length : 0;
   const duration = Number(meta.durationMs ?? 0);
-  if (!pages && !duration) return "每 10 秒刷新前端数据";
-  return `最近抓取 ${pages || "-"} 页，耗时 ${duration ? `${Math.round(duration / 1000)} 秒` : "-"}`;
+  const modeText = meta.mode === "incremental" ? `增量抓取，新增 ${Number(meta.newOrders ?? 0)} 单` : "全量补数据";
+  const windowText = isCurrentDate && last60.startAt && last60.endAt
+    ? ` · 店铺时间60分钟窗口 ${last60.startAt.slice(11, 16)}-${last60.endAt.slice(11, 16)}`
+    : " · 历史日期不计算实时60分钟";
+  if (!pages && !duration) return `每 10 秒刷新前端数据${windowText}`;
+  return `${modeText}，抓取 ${pages || "-"} 页，耗时 ${duration ? `${Math.round(duration / 1000)} 秒` : "-"}${windowText}`;
+}
+
+function emptyLast60() {
+  return {
+    orderCount: 0,
+    totalAmount: 0,
+    byUtmId: {}
+  };
 }
 
 function renderStatus(statusCounts = {}) {
@@ -137,4 +342,8 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+function escapeAttr(value) {
+  return escapeHtml(value).replace(/`/g, "&#096;");
 }

@@ -18,6 +18,7 @@ export async function loadConfig(configPath = "config.json") {
   config.scraper.headless ??= false;
   config.scraper.intervalSeconds ??= 20;
   config.scraper.timezone ??= "Asia/Shanghai";
+  config.scraper.storeTimezone ??= "America/Anchorage";
   config.scraper.storageStatePath ??= "data/auth-state.json";
   config.scraper.ordersOutputPath ??= "data/orders.json";
   config.scraper.dashboardDataPath ??= "public/data/summary.json";
