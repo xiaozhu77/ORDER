@@ -1,6 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright";
+import { playNewOrderAlert } from "./alert.js";
+import { captureAdsPowerAdData } from "./ad-spend-monitor.js";
 import { readJson, writeJson } from "./file-store.js";
 import { loadStoredOrders, saveIncrementalOrders, saveScrapedOrders } from "./orders-store.js";
 import { scrapeStoreIncremental, scrapeStoreRecentDays } from "./store-today.js";
@@ -54,6 +56,11 @@ export async function runScraper(config) {
             durationMs: Date.now() - startedAt.getTime()
           }
         });
+        if (existingOrderNumbers.size > 0 && scrapeResult.orders.length > 0) {
+          await playNewOrderAlert(scraper.alerts, scrapeResult.orders.length);
+          console.log(`检测到 ${scrapeResult.orders.length} 个新订单，已播放提示音。`);
+        }
+        await captureAdsAfterOrderScrape(scraper, summary);
         console.log(`[${startedAt.toLocaleString()}] 店铺端今天 ${summary.totals.orderCount} 单，最近60分钟 ${summary.last60Minutes.orderCount} 单`);
       } catch (error) {
         await writeHealth(scraper.dashboardDataPath, false, error);
@@ -64,6 +71,28 @@ export async function runScraper(config) {
     }
   } finally {
     await browser.close();
+  }
+}
+
+async function captureAdsAfterOrderScrape(scraper, summary) {
+  if (scraper.adCapture?.enabled === false) return;
+
+  try {
+    const result = await captureAdsPowerAdData({
+      outputPath: scraper.adCapture?.outputPath,
+      refresh: scraper.adCapture?.refreshBeforeRead !== false,
+      storeDate: summary?.selectedDate ?? summary?.storeDate ?? "",
+      orderSummaryGeneratedAt: summary?.generatedAt ?? ""
+    });
+
+    if (result.status === "ok") {
+      console.log(`广告端 ${result.rowsChecked} 个系列，总花费 $${formatMoney(result.totalSpend)}，已刷新后读取。`);
+      return;
+    }
+
+    console.warn(`广告端读取跳过: ${result.health?.message || result.message || "未知原因"}`);
+  } catch (error) {
+    console.warn(`广告端读取失败: ${error.message}`);
   }
 }
 
@@ -97,15 +126,15 @@ export async function ensureLoggedIn(page, context, scraper) {
 
   console.log("打开订单页，检查登录状态...");
   await gotoIgnoringAbort(page, backend.ordersUrl);
-  await page.waitForTimeout(3000);
+  const sessionState = await detectSessionState(page, backend, 20000);
 
-  if (await isLoggedIn(page, backend.selectors.loggedInMarker)) {
+  if (sessionState === "loggedIn") {
     console.log("已登录，进入订单抓取。");
     return;
   }
 
   console.log("未登录，打开登录页...");
-  await gotoIgnoringAbort(page, backend.loginUrl);
+  await gotoIgnoringAbort(page, getLoginPageUrl(backend.loginUrl));
   await page.waitForSelector(backend.selectors.usernameInput, { timeout: 60000 });
   await page.fill(backend.selectors.usernameInput, backend.username);
   await page.fill(backend.selectors.passwordInput, backend.password);
@@ -135,6 +164,59 @@ async function gotoIgnoringAbort(page, url) {
 async function isLoggedIn(page, markerSelector) {
   if (!markerSelector) return false;
   return page.locator(markerSelector).first().isVisible({ timeout: 5000 }).catch(() => false);
+}
+
+async function detectSessionState(page, backend, timeoutMs) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await isLoggedIn(page, backend.selectors.loggedInMarker)) {
+      return "loggedIn";
+    }
+
+    if (await isLoginPage(page, backend.selectors.usernameInput)) {
+      return "loginRequired";
+    }
+
+    await page.waitForTimeout(1000);
+  }
+
+  if (await isLoggedIn(page, backend.selectors.loggedInMarker)) {
+    return "loggedIn";
+  }
+
+  if (await isLoginPage(page, backend.selectors.usernameInput)) {
+    return "loginRequired";
+  }
+
+  if (!String(page.url()).includes("/login")) {
+    await gotoIgnoringAbort(page, backend.ordersUrl);
+    if (await isLoggedIn(page, backend.selectors.loggedInMarker)) {
+      return "loggedIn";
+    }
+  }
+
+  return "loginRequired";
+}
+
+async function isLoginPage(page, usernameSelector) {
+  if (String(page.url()).includes("/login")) {
+    return true;
+  }
+
+  return page.locator(usernameSelector).first().isVisible({ timeout: 1000 }).catch(() => false);
+}
+
+function getLoginPageUrl(loginUrl) {
+  try {
+    const url = new URL(loginUrl);
+    if (!/\/login\/?$/.test(url.pathname)) {
+      url.pathname = `${url.pathname.replace(/\/$/, "")}/login`;
+    }
+    return url.toString();
+  } catch {
+    return loginUrl;
+  }
 }
 
 async function newContext(browser, storageStatePath) {

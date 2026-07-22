@@ -2,6 +2,10 @@ let sortBy = "count";
 let selectedUtmId = "";
 let selectedDate = "";
 let latestData = null;
+let latestAdData = null;
+let draggedMetricId = "";
+
+const metricOrderStorageKey = "orderDashboard.metricOrder";
 
 const fallbackCurrency = {
   sourceSymbol: "£",
@@ -13,13 +17,17 @@ const fallbackCurrency = {
 const elements = {
   subtitle: document.querySelector("#subtitle"),
   health: document.querySelector("#health"),
+  metrics: document.querySelector(".metrics"),
   totalOrders: document.querySelector("#totalOrders"),
   totalAmount: document.querySelector("#totalAmount"),
   totalUsd: document.querySelector("#totalUsd"),
   last60Orders: document.querySelector("#last60Orders"),
   last60Amount: document.querySelector("#last60Amount"),
   recognizedOrders: document.querySelector("#recognizedOrders"),
-  recognitionRate: document.querySelector("#recognitionRate"),
+  profitCny: document.querySelector("#profitCny"),
+  profitInfo: document.querySelector("#profitInfo"),
+  adTotalSpend: document.querySelector("#adTotalSpend"),
+  adSpendInfo: document.querySelector("#adSpendInfo"),
   selectedDateLabel: document.querySelector("#selectedDateLabel"),
   dateSwitcher: document.querySelector("#dateSwitcher"),
   continuingInfo: document.querySelector("#continuingInfo"),
@@ -35,6 +43,7 @@ const elements = {
 elements.sortCount.addEventListener("click", () => setSort("count"));
 elements.sortAmount.addEventListener("click", () => setSort("amount"));
 elements.dateSwitcher.addEventListener("click", handleDateClick);
+initMetricSorting();
 
 refresh();
 setInterval(refresh, 10000);
@@ -46,18 +55,119 @@ function setSort(nextSortBy) {
   refresh();
 }
 
+function initMetricSorting() {
+  applySavedMetricOrder();
+
+  metricCards().forEach((card) => {
+    card.addEventListener("dragstart", handleMetricDragStart);
+    card.addEventListener("dragover", handleMetricDragOver);
+    card.addEventListener("dragleave", handleMetricDragLeave);
+    card.addEventListener("drop", handleMetricDrop);
+    card.addEventListener("dragend", handleMetricDragEnd);
+  });
+}
+
+function applySavedMetricOrder() {
+  const savedOrder = readMetricOrder();
+  if (!savedOrder.length) return;
+
+  const cardsById = new Map(metricCards().map((card) => [card.dataset.metricId, card]));
+  const orderedCards = [
+    ...savedOrder.map((id) => cardsById.get(id)).filter(Boolean),
+    ...metricCards().filter((card) => !savedOrder.includes(card.dataset.metricId))
+  ];
+
+  for (const card of orderedCards) {
+    elements.metrics.appendChild(card);
+  }
+}
+
+function handleMetricDragStart(event) {
+  const card = event.currentTarget;
+  draggedMetricId = card.dataset.metricId || "";
+  card.classList.add("dragging");
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", draggedMetricId);
+}
+
+function handleMetricDragOver(event) {
+  event.preventDefault();
+  const target = event.currentTarget;
+  if (target.dataset.metricId === draggedMetricId) return;
+  target.classList.add("dropTarget");
+  event.dataTransfer.dropEffect = "move";
+}
+
+function handleMetricDragLeave(event) {
+  event.currentTarget.classList.remove("dropTarget");
+}
+
+function handleMetricDrop(event) {
+  event.preventDefault();
+  const target = event.currentTarget;
+  const sourceId = event.dataTransfer.getData("text/plain") || draggedMetricId;
+  const source = metricCards().find((card) => card.dataset.metricId === sourceId);
+  target.classList.remove("dropTarget");
+
+  if (!source || source === target) return;
+
+  const rect = target.getBoundingClientRect();
+  const placeAfter = event.clientY > rect.top + rect.height / 2 || event.clientX > rect.left + rect.width / 2;
+  elements.metrics.insertBefore(source, placeAfter ? target.nextSibling : target);
+  saveMetricOrder();
+}
+
+function handleMetricDragEnd() {
+  draggedMetricId = "";
+  metricCards().forEach((card) => {
+    card.classList.remove("dragging", "dropTarget");
+  });
+}
+
+function metricCards() {
+  return Array.from(elements.metrics.querySelectorAll("[data-metric-id]"));
+}
+
+function readMetricOrder() {
+  try {
+    const value = JSON.parse(localStorage.getItem(metricOrderStorageKey) || "[]");
+    return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveMetricOrder() {
+  localStorage.setItem(metricOrderStorageKey, JSON.stringify(metricCards().map((card) => card.dataset.metricId)));
+}
+
 async function refresh() {
   try {
-    const response = await fetch(`/data/summary.json?t=${Date.now()}`);
-    const data = await response.json();
-    render(data);
+    const timestamp = Date.now();
+    const [summaryResponse, adData] = await Promise.all([
+      fetch(`/data/summary.json?t=${timestamp}`),
+      fetchOptionalJson(`/data/ad-summary.json?t=${timestamp}`)
+    ]);
+    const data = await summaryResponse.json();
+    render(data, adData);
   } catch (error) {
     setHealth(false, `读取失败：${error.message}`);
   }
 }
 
-function render(data) {
+async function fetchOptionalJson(url) {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    return response.json();
+  } catch {
+    return null;
+  }
+}
+
+function render(data, adData = latestAdData) {
   latestData = data;
+  latestAdData = adData;
   if (!selectedDate || !(data.dailySummaries?.[selectedDate])) {
     selectedDate = data.selectedDate || data.storeDate || data.availableDates?.[0] || "";
   }
@@ -77,10 +187,12 @@ function render(data) {
   elements.last60Orders.textContent = last60.orderCount ?? 0;
   elements.last60Amount.textContent = `${moneyGbp(last60.totalAmount ?? 0, currency)} / ${moneyUsd(last60.totalAmount ?? 0, currency)}`;
   elements.recognizedOrders.textContent = `${totals.recognizedOrders ?? 0} / ${totals.unrecognizedOrders ?? 0}`;
-  elements.recognitionRate.textContent = `${Math.round((totals.recognitionRate ?? 0) * 10000) / 100}%`;
+  renderProfitMetric(totals, currency, adData, selectedDate);
+  renderAdMetric(adData, selectedDate);
   elements.scrapeInfo.textContent = scrapeInfo(data, activeSummary, last60, isCurrentDate);
   renderContinuing(activeSummary.continuingGroups ?? [], last60, currency);
   renderOrderChart(data, activeSummary, selectedUtmId);
+  const adsByCampaignId = buildAdsByCampaignId(adData, selectedDate);
 
   const groups = [...(activeSummary.groups ?? [])].sort((a, b) => {
     if (sortBy === "amount") return b.totalAmount - a.totalAmount || b.orderCount - a.orderCount;
@@ -88,12 +200,13 @@ function render(data) {
   });
 
   if (!groups.length) {
-    elements.summaryRows.innerHTML = '<tr><td colspan="5">暂无数据</td></tr>';
+    elements.summaryRows.innerHTML = '<tr><td colspan="8">暂无数据</td></tr>';
     return;
   }
 
   elements.summaryRows.innerHTML = groups.map((group, index) => {
     const last60Group = last60.byUtmId?.[group.utmId];
+    const adRow = adsByCampaignId.get(group.utmId);
     return `
       <tr>
         <td>
@@ -110,6 +223,9 @@ function render(data) {
             <small>${moneyUsd(group.totalAmount, currency)}</small>
           </div>
         </td>
+        <td>${renderAdSpend(adRow)}</td>
+        <td>${renderAdStatus(adRow)}</td>
+        <td>${renderAdCpcCtr(adRow)}</td>
         <td>${escapeHtml(group.latestOrderTime || "-")}</td>
         <td>${renderStatus(group.statusCounts)}</td>
       </tr>
@@ -126,11 +242,69 @@ function renderDateSwitcher(dates, currentDate) {
   }).join("");
 }
 
+function renderAdMetric(adData, currentDate) {
+  if (!isAdDataAvailable(adData, currentDate)) {
+    elements.adTotalSpend.textContent = "$0.00";
+    elements.adSpendInfo.textContent = adData?.health?.message || "广告数据暂不可用";
+    return;
+  }
+
+  elements.adTotalSpend.textContent = moneyAd(adData.totalSpend ?? 0);
+  elements.adSpendInfo.textContent = `${adData.rowsChecked ?? 0} 个系列 · ${formatTime(adData.generatedAt)}`;
+}
+
+function renderProfitMetric(totals, currency, adData, currentDate) {
+  const orderUsd = Number(totals.totalAmount ?? 0) * Number(currency.rate || 0);
+  const adSpendUsd = isAdDataAvailable(adData, currentDate) ? Number(adData.totalSpend ?? 0) : 0;
+  const profitCny = (orderUsd * 0.5 - adSpendUsd) * 7;
+
+  elements.profitCny.textContent = moneyCny(profitCny);
+  elements.profitInfo.textContent = `(${moneyAd(orderUsd)} × 0.5 - ${moneyAd(adSpendUsd)}) × 7`;
+}
+
+function buildAdsByCampaignId(adData, currentDate) {
+  if (!isAdDataAvailable(adData, currentDate)) return new Map();
+  return new Map((adData.rows ?? [])
+    .filter((row) => row.campaignId)
+    .map((row) => [String(row.campaignId), row]));
+}
+
+function isAdDataAvailable(adData, currentDate) {
+  if (!adData || adData.status !== "ok") return false;
+  if (adData.storeDate && currentDate && adData.storeDate !== currentDate) return false;
+  return Array.isArray(adData.rows);
+}
+
+function renderAdSpend(adRow) {
+  if (!adRow) return "-";
+  return `
+    <div class="moneyStack adSpendStack">
+      <strong>${moneyAd(adRow.spend ?? 0)}</strong>
+      <small>预算 ${adRow.budget ? moneyAd(adRow.budget) : "-"}</small>
+    </div>
+  `;
+}
+
+function renderAdStatus(adRow) {
+  if (!adRow) return "-";
+  return `<span class="adStatusPill">${escapeHtml(adRow.status || "-")}</span>`;
+}
+
+function renderAdCpcCtr(adRow) {
+  if (!adRow) return "-";
+  return `
+    <div class="moneyStack">
+      <strong>${moneyAd(adRow.cpc ?? 0)}</strong>
+      <small>${formatNumber(adRow.ctr ?? 0)}%</small>
+    </div>
+  `;
+}
+
 function handleDateClick(event) {
   const button = event.target.closest("[data-date]");
   if (!button) return;
   selectedDate = button.dataset.date;
-  if (latestData) render(latestData);
+  if (latestData) render(latestData, latestAdData);
 }
 
 function renderContinuing(groups, last60, currency) {
@@ -321,6 +495,14 @@ function moneyGbp(value, currency) {
 
 function moneyUsd(value, currency) {
   return `${currency.targetSymbol}${formatNumber(Number(value) * Number(currency.rate || 0))}`;
+}
+
+function moneyAd(value) {
+  return `$${formatNumber(value)}`;
+}
+
+function moneyCny(value) {
+  return `¥${formatNumber(value)}`;
 }
 
 function formatNumber(value) {

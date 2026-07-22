@@ -16,11 +16,24 @@
     "enabled": true,
     "headless": false,
     "intervalSeconds": 20,
+    "alerts": {
+      "enabled": true,
+      "repeat": 2,
+      "durationMs": 250,
+      "gapMs": 120,
+      "startFrequency": 1200,
+      "stepFrequency": 200
+    },
     "timezone": "Asia/Shanghai",
     "storeTimezone": "America/Anchorage",
     "storageStatePath": "data/auth-state.json",
     "ordersOutputPath": "data/orders.json",
     "dashboardDataPath": "public/data/summary.json",
+    "adCapture": {
+      "enabled": true,
+      "outputPath": "public/data/ad-summary.json",
+      "refreshBeforeRead": true
+    },
     "backend": {
       "loginUrl": "https://example.com/admin/login",
       "ordersUrl": "https://example.com/admin/orders",

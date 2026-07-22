@@ -112,7 +112,7 @@ h1 {
 
 .metrics {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 18px;
 }
@@ -194,6 +194,22 @@ h1 {
 
 .metrics article {
   padding: 18px;
+  cursor: grab;
+  transition: background 160ms ease, border-color 160ms ease, opacity 160ms ease, transform 160ms ease;
+}
+
+.metrics article:active {
+  cursor: grabbing;
+}
+
+.metrics article.dragging {
+  opacity: 0.52;
+  transform: scale(0.98);
+}
+
+.metrics article.dropTarget {
+  border-color: rgba(80, 214, 255, 0.75);
+  background: linear-gradient(180deg, rgba(25, 47, 66, 0.98), rgba(10, 17, 27, 0.96));
 }
 
 .continuingSection,
@@ -399,7 +415,7 @@ h2 {
 table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 900px;
+  min-width: 1120px;
 }
 
 th,
@@ -491,6 +507,21 @@ tbody tr:hover {
 .moneyStack small {
   display: block;
   margin-top: 4px;
+}
+
+.adSpendStack strong {
+  color: #5eff99;
+}
+
+.adStatusPill {
+  display: inline-block;
+  padding: 4px 8px;
+  border: 1px solid rgba(80, 214, 255, 0.28);
+  border-radius: 999px;
+  color: #50d6ff;
+  background: rgba(80, 214, 255, 0.08);
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .statusPill {

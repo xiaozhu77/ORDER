@@ -4,8 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "ad-monitor-check": "node src/ad-spend-monitor.js",
     "start": "node src/index.js",
     "dashboard": "node src/server.js",
+    "order-alert-check": "node src/order-alert-check.js",
     "stats": "node src/stats.js",
     "test": "node --test test/*.test.js"
   },

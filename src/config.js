@@ -22,6 +22,10 @@ export async function loadConfig(configPath = "config.json") {
   config.scraper.storageStatePath ??= "data/auth-state.json";
   config.scraper.ordersOutputPath ??= "data/orders.json";
   config.scraper.dashboardDataPath ??= "public/data/summary.json";
+  config.scraper.adCapture ??= {};
+  config.scraper.adCapture.enabled ??= true;
+  config.scraper.adCapture.outputPath ??= "public/data/ad-summary.json";
+  config.scraper.adCapture.refreshBeforeRead ??= true;
 
   return config;
 }

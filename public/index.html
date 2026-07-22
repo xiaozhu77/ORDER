@@ -29,32 +29,39 @@
       </section>
 
       <section class="metrics">
-        <article>
+        <article data-metric-id="totalOrders" draggable="true">
           <div class="metricIcon">#</div>
           <span>所选日期订单</span>
           <strong id="totalOrders">0</strong>
         </article>
-        <article>
+        <article data-metric-id="last60Orders" draggable="true">
           <div class="metricIcon">60</div>
           <span>最近60分钟订单</span>
           <strong id="last60Orders">0</strong>
           <small id="last60Amount">£0.00 / $0.00</small>
         </article>
-        <article>
+        <article data-metric-id="totalAmount" draggable="true">
           <div class="metricIcon">£</div>
           <span>订单总金额</span>
           <strong id="totalAmount">£0.00</strong>
           <small id="totalUsd">$0.00</small>
         </article>
-        <article>
+        <article data-metric-id="recognizedOrders" draggable="true">
           <div class="metricIcon">ID</div>
           <span>已识别 / 未识别</span>
           <strong id="recognizedOrders">0 / 0</strong>
         </article>
-        <article>
-          <div class="metricIcon">%</div>
-          <span>识别率</span>
-          <strong id="recognitionRate">0%</strong>
+        <article data-metric-id="profitCny" draggable="true">
+          <div class="metricIcon">¥</div>
+          <span>盈利</span>
+          <strong id="profitCny">¥0.00</strong>
+          <small id="profitInfo">按订单美元金额和广告花费估算</small>
+        </article>
+        <article data-metric-id="adTotalSpend" draggable="true">
+          <div class="metricIcon">$</div>
+          <span>广告总花费</span>
+          <strong id="adTotalSpend">$0.00</strong>
+          <small id="adSpendInfo">广告数据暂不可用</small>
         </article>
       </section>
 
@@ -100,12 +107,15 @@
                 <th>UTM ID</th>
                 <th>订单数量</th>
                 <th>订单金额</th>
+                <th>广告消耗</th>
+                <th>广告状态</th>
+                <th>CPC / CTR</th>
                 <th>最新订单时间</th>
                 <th>状态分布</th>
               </tr>
             </thead>
             <tbody id="summaryRows">
-              <tr><td colspan="5">暂无数据</td></tr>
+              <tr><td colspan="8">暂无数据</td></tr>
             </tbody>
           </table>
         </div>
