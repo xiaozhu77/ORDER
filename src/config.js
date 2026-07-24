@@ -26,6 +26,8 @@ export async function loadConfig(configPath = "config.json") {
   config.scraper.adCapture.enabled ??= true;
   config.scraper.adCapture.outputPath ??= "public/data/ad-summary.json";
   config.scraper.adCapture.refreshBeforeRead ??= true;
+  config.scraper.adCapture.intervalMinutes ??= 0;
+  config.scraper.adCapture.controlPath ??= "data/ad-capture-control.json";
 
   return config;
 }

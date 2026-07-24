@@ -3,6 +3,7 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.js";
+import { readJson, writeJson } from "./file-store.js";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const publicDir = path.join(rootDir, "public");
@@ -14,6 +15,11 @@ export async function startServer(config) {
   const server = http.createServer(async (request, response) => {
     try {
       const url = new URL(request.url, `http://${request.headers.host}`);
+      if (url.pathname === "/api/ad-capture-control") {
+        await handleAdCaptureControl(request, response, config);
+        return;
+      }
+
       const pathname = url.pathname === "/" ? "/index.html" : decodeURIComponent(url.pathname);
       const filePath = path.resolve(publicDir, `.${pathname}`);
 
@@ -40,6 +46,52 @@ export async function startServer(config) {
   await new Promise((resolve) => server.listen(dashboard.port, dashboard.host, resolve));
   console.log(`看板已启动: http://${dashboard.host}:${dashboard.port}`);
   return server;
+}
+
+async function handleAdCaptureControl(request, response, config) {
+  const controlPath = config.scraper?.adCapture?.controlPath ?? "data/ad-capture-control.json";
+
+  if (request.method === "GET") {
+    sendJson(response, 200, await readAdCaptureControl(controlPath));
+    return;
+  }
+
+  if (request.method !== "POST") {
+    sendJson(response, 405, { error: "Method not allowed" });
+    return;
+  }
+
+  const body = await readRequestBody(request);
+  const payload = body ? JSON.parse(body) : {};
+  const nextState = {
+    paused: Boolean(payload.paused),
+    reason: String(payload.reason ?? ""),
+    updatedAt: new Date().toISOString()
+  };
+  await writeJson(controlPath, nextState);
+  sendJson(response, 200, nextState);
+}
+
+async function readAdCaptureControl(controlPath) {
+  const control = await readJson(controlPath, {});
+  return {
+    paused: Boolean(control?.paused),
+    reason: String(control?.reason ?? ""),
+    updatedAt: String(control?.updatedAt ?? "")
+  };
+}
+
+async function readRequestBody(request) {
+  const chunks = [];
+  for await (const chunk of request) {
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+function sendJson(response, statusCode, value) {
+  response.writeHead(statusCode, { "content-type": "application/json; charset=utf-8" });
+  response.end(JSON.stringify(value, null, 2));
 }
 
 async function ensureInitialSummary(config) {

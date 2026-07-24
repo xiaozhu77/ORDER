@@ -110,6 +110,28 @@ h1 {
   background: #31f06f;
 }
 
+.adCaptureToggle {
+  align-self: flex-start;
+  border: 1px solid rgba(80, 214, 255, 0.42);
+  border-radius: 8px;
+  padding: 10px 14px;
+  color: #061017;
+  background: #50d6ff;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.adCaptureToggle.paused {
+  border-color: rgba(255, 185, 70, 0.5);
+  color: #ffc56d;
+  background: rgba(255, 185, 70, 0.1);
+}
+
+.adCaptureToggle:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .metrics {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));

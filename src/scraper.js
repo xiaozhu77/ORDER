@@ -74,14 +74,36 @@ export async function runScraper(config) {
   }
 }
 
+function formatMoney(value) {
+  return Number(value).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+}
+
 async function captureAdsAfterOrderScrape(scraper, summary) {
   if (scraper.adCapture?.enabled === false) return;
 
   try {
+    const control = await readAdCaptureControl(scraper.adCapture?.controlPath);
+    if (control.paused) {
+      console.log(`广告端抓取已暂停：${control.reason || "正在手动调整广告"}`);
+      return;
+    }
+
+    const storeDate = summary?.selectedDate ?? summary?.storeDate ?? "";
+    const outputPath = scraper.adCapture?.outputPath;
+    const intervalMinutes = Math.max(0, Number(scraper.adCapture?.intervalMinutes ?? 0));
+    const cachedResult = await readFreshAdCapture(outputPath, storeDate, intervalMinutes);
+    if (cachedResult) {
+      console.log(`广告端沿用缓存 ${cachedResult.rowsChecked ?? 0} 个系列，总花费 $${formatMoney(cachedResult.totalSpend ?? 0)}，${intervalMinutes} 分钟刷新一次。`);
+      return;
+    }
+
     const result = await captureAdsPowerAdData({
-      outputPath: scraper.adCapture?.outputPath,
+      outputPath,
       refresh: scraper.adCapture?.refreshBeforeRead !== false,
-      storeDate: summary?.selectedDate ?? summary?.storeDate ?? "",
+      storeDate,
       orderSummaryGeneratedAt: summary?.generatedAt ?? ""
     });
 
@@ -90,10 +112,34 @@ async function captureAdsAfterOrderScrape(scraper, summary) {
       return;
     }
 
-    console.warn(`广告端读取跳过: ${result.health?.message || result.message || "未知原因"}`);
+    console.warn("广告端读取跳过，继续使用上一次成功广告数据。");
   } catch (error) {
-    console.warn(`广告端读取失败: ${error.message}`);
+    console.warn("广告端读取失败，继续使用上一次成功广告数据。");
   }
+}
+
+async function readFreshAdCapture(outputPath, storeDate, intervalMinutes) {
+  if (intervalMinutes <= 0) return null;
+  if (!outputPath) return null;
+
+  const cached = await readJson(outputPath, null);
+  if (!cached || cached.status !== "ok") return null;
+  if (storeDate && cached.storeDate && cached.storeDate !== storeDate) return null;
+
+  const generatedAtMs = Date.parse(cached.generatedAt);
+  if (!Number.isFinite(generatedAtMs)) return null;
+
+  const maxAgeMs = intervalMinutes * 60 * 1000;
+  return Date.now() - generatedAtMs < maxAgeMs ? cached : null;
+}
+
+async function readAdCaptureControl(controlPath) {
+  const control = await readJson(controlPath || "data/ad-capture-control.json", {});
+  return {
+    paused: Boolean(control?.paused),
+    reason: String(control?.reason ?? ""),
+    updatedAt: String(control?.updatedAt ?? "")
+  };
 }
 
 export async function scrapeOrders(page, backend) {

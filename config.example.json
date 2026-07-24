@@ -32,7 +32,9 @@
     "adCapture": {
       "enabled": true,
       "outputPath": "public/data/ad-summary.json",
-      "refreshBeforeRead": true
+      "refreshBeforeRead": true,
+      "intervalMinutes": 0,
+      "controlPath": "data/ad-capture-control.json"
     },
     "backend": {
       "loginUrl": "https://example.com/admin/login",

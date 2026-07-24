@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import {
+  captureAdsPowerAdData,
   normalizeAmount,
   normalizeCampaignRow,
   normalizePercent,
@@ -51,4 +55,26 @@ test("normalizes money and percent text", () => {
   assert.equal(normalizeAmount("-"), 0);
   assert.equal(normalizePercent("3.45%"), 3.45);
   assert.equal(normalizePercent(""), 0);
+});
+
+test("keeps previous successful output when ad capture is unavailable", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ad-monitor-"));
+  const outputPath = path.join(tempDir, "ad-summary.json");
+  const previous = {
+    status: "ok",
+    storeDate: "2026-07-23",
+    totalSpend: 12.34,
+    rows: [{ campaignId: "1870943504828513", spend: 12.34 }]
+  };
+
+  await fs.writeFile(outputPath, JSON.stringify(previous, null, 2), "utf8");
+  const result = await captureAdsPowerAdData({
+    logDirPath: path.join(tempDir, "missing-log-dir"),
+    outputPath,
+    storeDate: "2026-07-23"
+  });
+  const persisted = JSON.parse(await fs.readFile(outputPath, "utf8"));
+
+  assert.equal(result.status, "skip");
+  assert.deepEqual(persisted, previous);
 });

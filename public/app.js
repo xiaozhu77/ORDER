@@ -4,8 +4,10 @@ let selectedDate = "";
 let latestData = null;
 let latestAdData = null;
 let draggedMetricId = "";
+let adCapturePaused = false;
 
 const metricOrderStorageKey = "orderDashboard.metricOrder";
+const adDataStorageKey = "orderDashboard.latestAdData";
 
 const fallbackCurrency = {
   sourceSymbol: "£",
@@ -17,6 +19,7 @@ const fallbackCurrency = {
 const elements = {
   subtitle: document.querySelector("#subtitle"),
   health: document.querySelector("#health"),
+  adCaptureToggle: document.querySelector("#adCaptureToggle"),
   metrics: document.querySelector(".metrics"),
   totalOrders: document.querySelector("#totalOrders"),
   totalAmount: document.querySelector("#totalAmount"),
@@ -43,7 +46,9 @@ const elements = {
 elements.sortCount.addEventListener("click", () => setSort("count"));
 elements.sortAmount.addEventListener("click", () => setSort("amount"));
 elements.dateSwitcher.addEventListener("click", handleDateClick);
+elements.adCaptureToggle.addEventListener("click", toggleAdCapture);
 initMetricSorting();
+latestAdData = readStoredAdData();
 
 refresh();
 setInterval(refresh, 10000);
@@ -141,6 +146,23 @@ function saveMetricOrder() {
   localStorage.setItem(metricOrderStorageKey, JSON.stringify(metricCards().map((card) => card.dataset.metricId)));
 }
 
+function readStoredAdData() {
+  try {
+    const value = JSON.parse(localStorage.getItem(adDataStorageKey) || "null");
+    return value?.status === "ok" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveStoredAdData(adData) {
+  try {
+    localStorage.setItem(adDataStorageKey, JSON.stringify(adData));
+  } catch {
+    // In-memory data still covers the current page when browser storage is unavailable.
+  }
+}
+
 async function refresh() {
   try {
     const timestamp = Date.now();
@@ -149,10 +171,41 @@ async function refresh() {
       fetchOptionalJson(`/data/ad-summary.json?t=${timestamp}`)
     ]);
     const data = await summaryResponse.json();
+    const control = await fetchOptionalJson(`/api/ad-capture-control?t=${timestamp}`);
+    renderAdCaptureControl(control);
     render(data, adData);
   } catch (error) {
     setHealth(false, `读取失败：${error.message}`);
   }
+}
+
+async function toggleAdCapture() {
+  const paused = !adCapturePaused;
+  elements.adCaptureToggle.disabled = true;
+  try {
+    const response = await fetch("/api/ad-capture-control", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        paused,
+        reason: paused ? "用户正在手动调整广告" : ""
+      })
+    });
+    renderAdCaptureControl(await response.json());
+  } catch (error) {
+    elements.adCaptureToggle.textContent = `切换失败：${error.message}`;
+  } finally {
+    elements.adCaptureToggle.disabled = false;
+  }
+}
+
+function renderAdCaptureControl(control) {
+  adCapturePaused = Boolean(control?.paused);
+  elements.adCaptureToggle.classList.toggle("paused", adCapturePaused);
+  elements.adCaptureToggle.textContent = adCapturePaused ? "抓取" : "暂停广告抓取";
+  elements.adCaptureToggle.title = adCapturePaused
+    ? `广告抓取已暂停：${control?.reason || "正在手动调整广告"}`
+    : "恢复状态下，广告抓取跟随后台订单抓取频率";
 }
 
 async function fetchOptionalJson(url) {
@@ -167,10 +220,15 @@ async function fetchOptionalJson(url) {
 
 function render(data, adData = latestAdData) {
   latestData = data;
-  latestAdData = adData;
+  if (adData?.status === "ok") {
+    latestAdData = adData;
+    saveStoredAdData(adData);
+  }
+
   if (!selectedDate || !(data.dailySummaries?.[selectedDate])) {
     selectedDate = data.selectedDate || data.storeDate || data.availableDates?.[0] || "";
   }
+  const displayAdData = latestAdData;
   const activeSummary = data.dailySummaries?.[selectedDate] ?? data;
   const isCurrentDate = selectedDate === (data.selectedDate || data.storeDate);
   const totals = activeSummary.totals ?? {};
@@ -187,12 +245,12 @@ function render(data, adData = latestAdData) {
   elements.last60Orders.textContent = last60.orderCount ?? 0;
   elements.last60Amount.textContent = `${moneyGbp(last60.totalAmount ?? 0, currency)} / ${moneyUsd(last60.totalAmount ?? 0, currency)}`;
   elements.recognizedOrders.textContent = `${totals.recognizedOrders ?? 0} / ${totals.unrecognizedOrders ?? 0}`;
-  renderProfitMetric(totals, currency, adData, selectedDate);
-  renderAdMetric(adData, selectedDate);
+  renderProfitMetric(totals, currency, displayAdData, selectedDate);
+  renderAdMetric(displayAdData, selectedDate);
   elements.scrapeInfo.textContent = scrapeInfo(data, activeSummary, last60, isCurrentDate);
   renderContinuing(activeSummary.continuingGroups ?? [], last60, currency);
   renderOrderChart(data, activeSummary, selectedUtmId);
-  const adsByCampaignId = buildAdsByCampaignId(adData, selectedDate);
+  const adsByCampaignId = buildAdsByCampaignId(displayAdData, selectedDate);
 
   const groups = [...(activeSummary.groups ?? [])].sort((a, b) => {
     if (sortBy === "amount") return b.totalAmount - a.totalAmount || b.orderCount - a.orderCount;
@@ -245,7 +303,7 @@ function renderDateSwitcher(dates, currentDate) {
 function renderAdMetric(adData, currentDate) {
   if (!isAdDataAvailable(adData, currentDate)) {
     elements.adTotalSpend.textContent = "$0.00";
-    elements.adSpendInfo.textContent = adData?.health?.message || "广告数据暂不可用";
+    elements.adSpendInfo.textContent = "等待广告数据";
     return;
   }
 

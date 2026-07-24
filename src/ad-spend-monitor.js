@@ -60,7 +60,7 @@ export async function captureAdsPowerAdData(options = {}) {
     }
   }
 
-  if (options.outputPath) {
+  if (options.outputPath && result.status === "ok") {
     await writeJson(options.outputPath, result);
   }
 
@@ -210,9 +210,57 @@ async function readAdsPowerCampaignRows(debuggerEndpoint, options = {}) {
 }
 
 async function refreshCampaignPage(page) {
-  await page.reload({ waitUntil: "domcontentloaded", timeout: 60000 });
+  const clicked = await clickInPageRefreshButton(page);
+  if (!clicked) {
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 60000 });
+  }
   await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {});
   await page.waitForSelector("[slot^='cell-']", { timeout: 30000 });
+}
+
+async function clickInPageRefreshButton(page) {
+  const exactRefreshButton = page
+    .locator(".cl-flex-none.cl-inline-flex.cl-items-center.cl-w-fit")
+    .filter({ hasText: "刷新数据" })
+    .locator("ks-icon-button-1-1-1n, ks-icon-button, .KsIconButton")
+    .first();
+
+  try {
+    if (await exactRefreshButton.count()) {
+      await exactRefreshButton.click({ timeout: 10000 });
+      await page.waitForTimeout(8000);
+      return true;
+    }
+  } catch {
+    // Fall back to DOM click detection when TikTok's icon button swallows Playwright clicks.
+  }
+
+  const clicked = await page.evaluate(() => {
+    const preferredClass = "cl-flex-none cl-inline-flex cl-items-center cl-w-fit";
+    const candidates = Array.from(document.querySelectorAll("button, [role='button'], .cl-flex-none.cl-inline-flex.cl-items-center.cl-w-fit"));
+    const refreshButton = candidates.find((element) => {
+      const text = (element.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+      const aria = (element.getAttribute("aria-label") || "").toLowerCase();
+      const title = (element.getAttribute("title") || "").toLowerCase();
+      const className = String(element.getAttribute("class") || "").toLowerCase();
+      const testId = String(element.getAttribute("data-testid") || "").toLowerCase();
+      const label = `${text} ${aria} ${title} ${className} ${testId}`;
+
+      if (element.closest("[slot^='cell-']")) return false;
+      if (element.hasAttribute("disabled") || element.getAttribute("aria-disabled") === "true") return false;
+      if (preferredClass.split(" ").every((name) => element.classList.contains(name))) return true;
+      return /刷新|refresh|reload|sync|rotate|refresh/.test(label);
+    });
+
+    if (!refreshButton) return false;
+    refreshButton.scrollIntoView({ block: "center", inline: "center" });
+    refreshButton.click();
+    return true;
+  }).catch(() => false);
+
+  if (!clicked) return false;
+  await page.waitForTimeout(8000);
+  return true;
 }
 
 function buildResult({
