@@ -1,20 +1,59 @@
 {
   "name": "order-utm-dashboard",
   "version": "0.1.0",
+  "description": "店铺订单广告看板",
   "private": true,
   "type": "module",
+  "main": "src/desktop.js",
   "scripts": {
     "ad-monitor-check": "node src/ad-spend-monitor.js",
+    "desktop": "electron .",
     "start": "node src/index.js",
     "restart": "powershell -ExecutionPolicy Bypass -File scripts/restart-dashboard.ps1",
     "restart-bg": "powershell -ExecutionPolicy Bypass -File scripts/restart-dashboard.ps1 -Background",
     "dashboard": "node src/server.js",
     "order-alert-check": "node src/order-alert-check.js",
+    "pack:win": "electron-builder --win portable",
     "stats": "node src/stats.js",
     "test": "node --test test/*.test.js"
+  },
+  "build": {
+    "appId": "com.local.order-utm-dashboard",
+    "productName": "店铺订单广告看板",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "public/**/*",
+      "scripts/**/*",
+      "package.json",
+      "config.example.json"
+    ],
+    "extraResources": [
+      {
+        "from": "config.json",
+        "to": "config.json"
+      },
+      {
+        "from": "data",
+        "to": "data",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ]
+    }
   },
   "dependencies": {
     "playwright": "^1.45.0"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3"
+  }
 }

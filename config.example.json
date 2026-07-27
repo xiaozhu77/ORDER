@@ -14,7 +14,7 @@
   },
   "scraper": {
     "enabled": true,
-    "headless": false,
+    "headless": true,
     "intervalSeconds": 20,
     "alerts": {
       "enabled": true,
