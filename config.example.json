@@ -34,7 +34,10 @@
       "outputPath": "public/data/ad-summary.json",
       "refreshBeforeRead": true,
       "intervalMinutes": 0,
-      "controlPath": "data/ad-capture-control.json"
+      "controlPath": "data/ad-capture-control.json",
+      "adAccountId": "",
+      "adAccountName": "",
+      "campaignPageUrl": ""
     },
     "backend": {
       "loginUrl": "https://example.com/admin/login",
@@ -54,5 +57,30 @@
         "landingUrl": "[data-field=\"landing-url\"]"
       }
     }
-  }
+  },
+  "stores": [
+    {
+      "key": "store-a",
+      "name": "Store A",
+      "url": "https://store-a.example.com/",
+      "scraper": {
+        "storageStatePath": "data/stores/store-a/auth-state.json",
+        "ordersOutputPath": "data/stores/store-a/orders.json",
+        "dashboardDataPath": "public/data/stores/store-a/summary.json",
+        "adCapture": {
+          "outputPath": "public/data/stores/store-a/ad-summary.json",
+          "controlPath": "data/stores/store-a/ad-capture-control.json",
+          "adAccountId": "",
+          "adAccountName": "",
+          "campaignPageUrl": ""
+        },
+        "backend": {
+          "loginUrl": "https://store-a.example.com/admin",
+          "ordersUrl": "https://store-a.example.com/admin/orderList",
+          "username": "",
+          "password": ""
+        }
+      }
+    }
+  ]
 }

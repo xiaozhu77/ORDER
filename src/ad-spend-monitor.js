@@ -8,6 +8,7 @@ import { readJson, writeJson } from "./file-store.js";
 const DEFAULT_LOG_PATH = path.join(process.env.APPDATA ?? "", "adspower_global", "cwd_global", "log");
 const DEFAULT_OUTPUT_PATH = "public/data/ad-summary.json";
 const DEBUGGER_URL_PATTERN = /webSocketDebuggerUrl-\s+(ws:\/\/127\.0\.0\.1:\d+\/devtools\/browser\/[^\s]+)/g;
+let captureQueue = Promise.resolve();
 
 export async function runAdSpendMonitor(options = {}) {
   const config = await loadConfig(options.configPath);
@@ -18,12 +19,19 @@ export async function runAdSpendMonitor(options = {}) {
     logDirPath: options.logDirPath ?? DEFAULT_LOG_PATH,
     outputPath: options.outputPath,
     refresh: options.refresh !== false,
+    adAccountId: options.adAccountId ?? config.scraper.adCapture.adAccountId,
     storeDate: options.storeDate ?? storeSummary.storeDate,
     orderSummaryGeneratedAt: storeSummary.generatedAt
   });
 }
 
 export async function captureAdsPowerAdData(options = {}) {
+  const run = captureQueue.then(() => captureAdsPowerAdDataOnce(options));
+  captureQueue = run.catch(() => {});
+  return run;
+}
+
+async function captureAdsPowerAdDataOnce(options = {}) {
   const logDirPath = path.resolve(options.logDirPath ?? DEFAULT_LOG_PATH);
   const debuggerEndpoint = await getLatestDebuggerEndpoint(logDirPath);
 
@@ -37,7 +45,10 @@ export async function captureAdsPowerAdData(options = {}) {
     });
   } else {
     const browserResult = await readAdsPowerCampaignRows(debuggerEndpoint, {
-      refresh: options.refresh !== false
+      refresh: options.refresh !== false,
+      adAccountId: options.adAccountId,
+      connectTimeoutMs: options.connectTimeoutMs,
+      readTimeoutMs: options.readTimeoutMs
     });
 
     if (!browserResult.ok) {
@@ -51,11 +62,13 @@ export async function captureAdsPowerAdData(options = {}) {
     } else {
       result = buildResult({
         status: "ok",
-        storeDate: options.storeDate,
+        storeDate: browserResult.adDate || options.storeDate,
         orderSummaryGeneratedAt: options.orderSummaryGeneratedAt,
         debuggerEndpoint,
         adPageUrl: browserResult.adPageUrl,
-        rows: browserResult.rows
+        rows: browserResult.rows,
+        totalSpend: browserResult.totalSpend,
+        totalSpendSource: browserResult.totalSpendSource
       });
     }
   }
@@ -69,7 +82,7 @@ export async function captureAdsPowerAdData(options = {}) {
 
 export function normalizeCampaignRow(row) {
   const normalized = {
-    campaignId: normalizeText(row?.campaign_id),
+    campaignId: normalizeText(row?.campaign_id) || normalizeText(row?.campaignId) || normalizeText(row?.__rowId),
     campaignName: normalizeText(row?.campaign_name),
     status: normalizeStatus(row?.campaign_status),
     spend: normalizeAmount(row?.stat_cost),
@@ -119,6 +132,31 @@ export function normalizePercent(value) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
+export function extractAdAccountId(url) {
+  try {
+    return new URL(url).searchParams.get("aadvid") ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function extractAdDate(url) {
+  try {
+    const params = new URL(url).searchParams;
+    const startDate = params.get("st") ?? "";
+    const endDate = params.get("et") ?? "";
+    return /^\d{4}-\d{2}-\d{2}$/.test(startDate) && startDate === endDate ? startDate : "";
+  } catch {
+    return "";
+  }
+}
+
+export function isTargetCampaignPage(url, adAccountId = "") {
+  if (!/ads\.tiktok\.com\/i18n\/manage\/campaign/.test(url)) return false;
+  const normalizedAdAccountId = normalizeText(adAccountId);
+  return !normalizedAdAccountId || extractAdAccountId(url) === normalizedAdAccountId;
+}
+
 async function readStoreSummaryMetadata(summaryPath) {
   try {
     const summary = await readJson(summaryPath);
@@ -158,13 +196,18 @@ async function getLatestDebuggerEndpoint(logDirPath) {
 }
 
 async function readAdsPowerCampaignRows(debuggerEndpoint, options = {}) {
+  if (options.refresh === false) {
+    const quickResult = await readAdsPowerCampaignRowsViaPageCdp(debuggerEndpoint, options).catch(() => null);
+    if (quickResult?.ok) return quickResult;
+  }
+
   let browser;
   try {
-    browser = await chromium.connectOverCDP(debuggerEndpoint);
-    const page = browser
+    browser = await chromium.connectOverCDP(debuggerEndpoint, { timeout: Number(options.connectTimeoutMs ?? 5000) });
+    const pages = browser
       .contexts()
-      .flatMap((context) => context.pages())
-      .find((candidate) => /ads\.tiktok\.com\/i18n\/manage\/campaign/.test(candidate.url()));
+      .flatMap((context) => context.pages());
+    const page = pages.find((candidate) => isTargetCampaignPage(candidate.url(), options.adAccountId));
 
     if (!page) {
       return {
@@ -176,7 +219,7 @@ async function readAdsPowerCampaignRows(debuggerEndpoint, options = {}) {
     if (options.refresh !== false) {
       await refreshCampaignPage(page);
     } else {
-      await page.waitForSelector("[slot^='cell-']", { timeout: 30000 });
+      await page.waitForSelector("[slot^='cell-']", { timeout: Number(options.readTimeoutMs ?? 5000) });
     }
 
     const rows = await page.evaluate(() => {
@@ -187,14 +230,26 @@ async function readAdsPowerCampaignRows(debuggerEndpoint, options = {}) {
         if (!match) continue;
         const [, rowId, field] = match;
         grouped[rowId] ??= {};
+        grouped[rowId].__rowId = rowId;
         grouped[rowId][field] = (element.textContent || "").replace(/\s+/g, " ").trim();
       }
       return Object.values(grouped);
+    });
+    const pageTotalSpend = await page.evaluate(() => {
+      const table = document.querySelector("ks-virtual-table-1-1-1n, ks-virtual-table, .KsTable") || document.body;
+      const moneyElements = Array.from(table.querySelectorAll("ks-text-1-1-1n, span, div"))
+        .filter((element) => !element.closest("[slot^='cell-']"))
+        .map((element) => (element.textContent || "").replace(/\s+/g, " ").trim())
+        .filter((text) => /^\d[\d,]*(?:\.\d+)?\s*USD$/i.test(text));
+      return moneyElements[0] || "";
     });
 
     return {
       ok: true,
       adPageUrl: page.url(),
+      adDate: extractAdDate(page.url()),
+      totalSpend: normalizeAmount(pageTotalSpend),
+      totalSpendSource: pageTotalSpend ? "table-total" : "visible-rows",
       rows: rows
         .map((row) => normalizeCampaignRow(row))
         .filter((row) => row.campaignId && row.campaignName)
@@ -207,6 +262,106 @@ async function readAdsPowerCampaignRows(debuggerEndpoint, options = {}) {
   } finally {
     await browser?.close().catch(() => {});
   }
+}
+
+async function readAdsPowerCampaignRowsViaPageCdp(debuggerEndpoint, options = {}) {
+  const pages = await listDevtoolsPages(debuggerEndpoint, options.connectTimeoutMs ?? 5000);
+  const pageInfo = pages.find((page) => page.type === "page" && isTargetCampaignPage(page.url, options.adAccountId));
+  if (!pageInfo?.webSocketDebuggerUrl) {
+    return {
+      ok: false,
+      reason: "未找到当前打开的 TikTok Ads 推广系列页面"
+    };
+  }
+
+  const data = await evaluatePageCdp(pageInfo.webSocketDebuggerUrl, `(() => {
+    const grouped = {};
+    for (const element of Array.from(document.querySelectorAll("[slot^='cell-']"))) {
+      const slot = element.getAttribute("slot") || "";
+      const match = /^cell-(.+?)_(.+)$/.exec(slot);
+      if (!match) continue;
+      const [, rowId, field] = match;
+      grouped[rowId] ??= {};
+      grouped[rowId].__rowId = rowId;
+      grouped[rowId][field] = (element.textContent || "").replace(/\\s+/g, " ").trim();
+    }
+    const table = document.querySelector("ks-virtual-table-1-1-1n, ks-virtual-table, .KsTable") || document.body;
+    const moneyElements = Array.from(table.querySelectorAll("ks-text-1-1-1n, span, div"))
+      .filter((element) => !element.closest("[slot^='cell-']"))
+      .map((element) => (element.textContent || "").replace(/\\s+/g, " ").trim())
+      .filter((text) => /^\\d[\\d,]*(?:\\.\\d+)?\\s*USD$/i.test(text));
+    return {
+      url: location.href,
+      rows: Object.values(grouped),
+      pageTotalSpend: moneyElements[0] || ""
+    };
+  })()`, options.readTimeoutMs ?? 5000);
+
+  return {
+    ok: true,
+    adPageUrl: data.url || pageInfo.url,
+    adDate: extractAdDate(data.url || pageInfo.url),
+    totalSpend: normalizeAmount(data.pageTotalSpend),
+    totalSpendSource: data.pageTotalSpend ? "table-total" : "visible-rows",
+    rows: (data.rows || [])
+      .map((row) => normalizeCampaignRow(row))
+      .filter((row) => row.campaignId && row.campaignName)
+  };
+}
+
+async function listDevtoolsPages(debuggerEndpoint, timeoutMs) {
+  const baseUrl = debuggerEndpoint.replace(/^ws:/, "http:").replace(/\/devtools\/browser\/.*$/, "");
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${baseUrl}/json/list`, { signal: controller.signal });
+    return response.ok ? await response.json() : [];
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function evaluatePageCdp(webSocketUrl, expression, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(webSocketUrl);
+    const timeout = setTimeout(() => {
+      socket.close();
+      reject(new Error(`page CDP evaluate timeout ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    socket.addEventListener("open", () => {
+      socket.send(JSON.stringify({
+        id: 1,
+        method: "Runtime.evaluate",
+        params: {
+          expression,
+          awaitPromise: true,
+          returnByValue: true
+        }
+      }));
+    });
+
+    socket.addEventListener("message", (event) => {
+      const message = JSON.parse(event.data);
+      if (message.id !== 1) return;
+      clearTimeout(timeout);
+      socket.close();
+      if (message.error) {
+        reject(new Error(message.error.message || "page CDP evaluate failed"));
+        return;
+      }
+      if (message.result?.exceptionDetails) {
+        reject(new Error(message.result.exceptionDetails.text || "page CDP evaluate exception"));
+        return;
+      }
+      resolve(message.result?.result?.value ?? {});
+    });
+
+    socket.addEventListener("error", () => {
+      clearTimeout(timeout);
+      reject(new Error("page CDP websocket error"));
+    });
+  });
 }
 
 async function refreshCampaignPage(page) {
@@ -228,7 +383,7 @@ async function clickInPageRefreshButton(page) {
   try {
     if (await exactRefreshButton.count()) {
       await exactRefreshButton.click({ timeout: 10000 });
-      await page.waitForTimeout(8000);
+      await page.waitForTimeout(3000);
       return true;
     }
   } catch {
@@ -259,7 +414,7 @@ async function clickInPageRefreshButton(page) {
   }).catch(() => false);
 
   if (!clicked) return false;
-  await page.waitForTimeout(8000);
+  await page.waitForTimeout(3000);
   return true;
 }
 
@@ -270,9 +425,15 @@ function buildResult({
   debuggerEndpoint = "",
   adPageUrl = "",
   rows = [],
+  totalSpend,
+  totalSpendSource = "",
   reason = ""
 }) {
   const ok = status === "ok";
+  const rowsSpend = sumSpend(rows);
+  const resolvedTotalSpend = Number.isFinite(Number(totalSpend)) && Number(totalSpend) > 0
+    ? Math.round(Number(totalSpend) * 100) / 100
+    : rowsSpend;
   return {
     status,
     generatedAt: new Date().toISOString(),
@@ -281,7 +442,9 @@ function buildResult({
     debuggerEndpoint,
     adPageUrl,
     rowsChecked: rows.length,
-    totalSpend: sumSpend(rows),
+    rowsSpend,
+    totalSpend: resolvedTotalSpend,
+    totalSpendSource: totalSpendSource || "visible-rows",
     rows,
     health: {
       ok,
@@ -328,8 +491,9 @@ function parseCliArgs(argv) {
     if (token === "--config") args.configPath = argv[index + 1];
     if (token === "--log-dir") args.logDirPath = argv[index + 1];
     if (token === "--output") args.outputPath = argv[index + 1];
+    if (token === "--ad-account-id") args.adAccountId = argv[index + 1];
     if (token === "--no-refresh") args.refresh = false;
-    if (["--summary", "--config", "--log-dir", "--output"].includes(token)) {
+    if (["--summary", "--config", "--log-dir", "--output", "--ad-account-id"].includes(token)) {
       index += 1;
     }
   }

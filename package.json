@@ -6,6 +6,8 @@
   "scripts": {
     "ad-monitor-check": "node src/ad-spend-monitor.js",
     "start": "node src/index.js",
+    "restart": "powershell -ExecutionPolicy Bypass -File scripts/restart-dashboard.ps1",
+    "restart-bg": "powershell -ExecutionPolicy Bypass -File scripts/restart-dashboard.ps1 -Background",
     "dashboard": "node src/server.js",
     "order-alert-check": "node src/order-alert-check.js",
     "stats": "node src/stats.js",

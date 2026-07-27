@@ -110,6 +110,26 @@ h1 {
   background: #31f06f;
 }
 
+.storeSwitcherLabel {
+  display: grid;
+  gap: 6px;
+  min-width: 180px;
+  color: #8ca3bc;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.storeSwitcher {
+  border: 1px solid rgba(80, 214, 255, 0.42);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #f2f7ff;
+  background: rgba(5, 10, 18, 0.82);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 800;
+}
+
 .adCaptureToggle {
   align-self: flex-start;
   border: 1px solid rgba(80, 214, 255, 0.42);
@@ -579,6 +599,11 @@ tbody tr:hover {
   }
 
   .health {
+    margin-top: 14px;
+    width: 100%;
+  }
+
+  .storeSwitcherLabel {
     margin-top: 14px;
     width: 100%;
   }

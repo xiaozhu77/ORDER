@@ -5,6 +5,8 @@ import path from "node:path";
 import test from "node:test";
 import {
   captureAdsPowerAdData,
+  extractAdAccountId,
+  isTargetCampaignPage,
   normalizeAmount,
   normalizeCampaignRow,
   normalizePercent,
@@ -38,6 +40,27 @@ test("normalizes visible campaign row fields", () => {
   assert.equal(row.roas, 2.4);
   assert.equal(row.conversionCost, 4.1);
   assert.equal(row.raw.stat_cost, "$8.20");
+});
+
+test("uses table slot row id when campaign_id column is absent", () => {
+  const row = normalizeCampaignRow({
+    __rowId: "1871602568741314",
+    campaign_name: "女8-I-7.24",
+    campaign_status: "投放中",
+    stat_cost: "0.00 USD"
+  });
+
+  assert.equal(row.campaignId, "1871602568741314");
+  assert.equal(row.campaignName, "女8-I-7.24");
+});
+
+test("matches the configured TikTok ad account page", () => {
+  const resepedUrl = "https://ads.tiktok.com/i18n/manage/campaign?aadvid=7618477796998119432&navigate_from=creation";
+  const otherUrl = "https://ads.tiktok.com/i18n/manage/campaign?aadvid=7646310799505506311&navigate_from=creation";
+
+  assert.equal(extractAdAccountId(resepedUrl), "7618477796998119432");
+  assert.equal(isTargetCampaignPage(resepedUrl, "7618477796998119432"), true);
+  assert.equal(isTargetCampaignPage(otherUrl, "7618477796998119432"), false);
 });
 
 test("sums campaign spend", () => {

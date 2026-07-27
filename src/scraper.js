@@ -60,7 +60,6 @@ export async function runScraper(config) {
           await playNewOrderAlert(scraper.alerts, scrapeResult.orders.length);
           console.log(`检测到 ${scrapeResult.orders.length} 个新订单，已播放提示音。`);
         }
-        await captureAdsAfterOrderScrape(scraper, summary);
         console.log(`[${startedAt.toLocaleString()}] 店铺端今天 ${summary.totals.orderCount} 单，最近60分钟 ${summary.last60Minutes.orderCount} 单`);
       } catch (error) {
         await writeHealth(scraper.dashboardDataPath, false, error);
@@ -74,6 +73,36 @@ export async function runScraper(config) {
   }
 }
 
+export async function runAdCaptureLoop(config) {
+  const scraper = config.scraper;
+  if (scraper.adCapture?.enabled === false) return;
+  let lastRefreshAt = 0;
+
+  while (true) {
+    const startedAt = new Date();
+    try {
+      const summary = await readJson(scraper.dashboardDataPath, null);
+      if (summary) {
+        const refreshEveryMs = Math.max(0, Number(scraper.adCapture?.refreshEverySeconds ?? 60)) * 1000;
+        const shouldRefresh = refreshEveryMs > 0 && Date.now() - lastRefreshAt >= refreshEveryMs;
+        const result = await captureAdsAfterOrderScrape(scraper, summary, { refresh: shouldRefresh });
+        if (shouldRefresh && result?.status === "ok") {
+          lastRefreshAt = Date.now();
+        }
+      }
+    } catch (error) {
+      console.warn(`[${startedAt.toLocaleString()}] 广告快速轮询失败: ${error.message}`);
+    }
+
+    const pollSeconds = Math.max(3, Number(scraper.adCapture?.pollSeconds ?? 8));
+    await sleep(pollSeconds * 1000);
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function formatMoney(value) {
   return Number(value).toLocaleString("en-US", {
     minimumFractionDigits: 2,
@@ -81,7 +110,7 @@ function formatMoney(value) {
   });
 }
 
-async function captureAdsAfterOrderScrape(scraper, summary) {
+async function captureAdsAfterOrderScrape(scraper, summary, options = {}) {
   if (scraper.adCapture?.enabled === false) return;
 
   try {
@@ -101,21 +130,44 @@ async function captureAdsAfterOrderScrape(scraper, summary) {
     }
 
     const result = await captureAdsPowerAdData({
-      outputPath,
-      refresh: scraper.adCapture?.refreshBeforeRead !== false,
+      refresh: options.refresh ?? scraper.adCapture?.refreshBeforeRead !== false,
+      adAccountId: scraper.adCapture?.adAccountId,
       storeDate,
       orderSummaryGeneratedAt: summary?.generatedAt ?? ""
     });
 
     if (result.status === "ok") {
-      console.log(`广告端 ${result.rowsChecked} 个系列，总花费 $${formatMoney(result.totalSpend)}，已刷新后读取。`);
-      return;
+      if (result.storeDate && storeDate && result.storeDate !== storeDate) {
+        const datedOutputPath = datedAdOutputPath(outputPath, result.storeDate);
+        if (datedOutputPath) {
+          await writeJson(datedOutputPath, result);
+          console.warn(`广告页日期 ${result.storeDate} 与当前店铺日 ${storeDate} 不一致，已写入历史广告文件，未覆盖当前日广告。`);
+        }
+        return result;
+      }
+      const modeText = (options.refresh ?? scraper.adCapture?.refreshBeforeRead !== false) ? "已执行广告端刷新" : "快速读取";
+      console.log(`广告端 ${modeText}，${result.rowsChecked} 个系列，总花费 $${formatMoney(result.totalSpend)}，已保存。`);
+      if (outputPath) {
+        await writeJson(outputPath, result);
+      }
+      return result;
     }
 
     console.warn("广告端读取跳过，继续使用上一次成功广告数据。");
+    return result;
   } catch (error) {
     console.warn("广告端读取失败，继续使用上一次成功广告数据。");
+    return {
+      status: "skip",
+      message: error.message
+    };
   }
+}
+
+function datedAdOutputPath(outputPath, storeDate) {
+  if (!outputPath || !/^\d{4}-\d{2}-\d{2}$/.test(storeDate || "")) return "";
+  const parsed = path.parse(outputPath);
+  return path.join(parsed.dir, `${parsed.name}-${storeDate}${parsed.ext || ".json"}`);
 }
 
 async function readFreshAdCapture(outputPath, storeDate, intervalMinutes) {

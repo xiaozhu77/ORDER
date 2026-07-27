@@ -15,8 +15,13 @@ export async function startServer(config) {
   const server = http.createServer(async (request, response) => {
     try {
       const url = new URL(request.url, `http://${request.headers.host}`);
+      if (url.pathname === "/api/stores") {
+        sendJson(response, 200, buildStorePayload(config));
+        return;
+      }
+
       if (url.pathname === "/api/ad-capture-control") {
-        await handleAdCaptureControl(request, response, config);
+        await handleAdCaptureControl(request, response, config, url);
         return;
       }
 
@@ -43,13 +48,25 @@ export async function startServer(config) {
     }
   });
 
-  await new Promise((resolve) => server.listen(dashboard.port, dashboard.host, resolve));
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(dashboard.port, dashboard.host, () => {
+      server.off("error", reject);
+      resolve();
+    });
+  }).catch((error) => {
+    if (error.code === "EADDRINUSE") {
+      throw new Error(`看板端口已被占用：http://${dashboard.host}:${dashboard.port}。如果页面打不开，请运行 npm.cmd run restart。`);
+    }
+    throw error;
+  });
   console.log(`看板已启动: http://${dashboard.host}:${dashboard.port}`);
   return server;
 }
 
-async function handleAdCaptureControl(request, response, config) {
-  const controlPath = config.scraper?.adCapture?.controlPath ?? "data/ad-capture-control.json";
+async function handleAdCaptureControl(request, response, config, url) {
+  const store = resolveStore(config, url.searchParams.get("store"));
+  const controlPath = store.scraper?.adCapture?.controlPath ?? "data/ad-capture-control.json";
 
   if (request.method === "GET") {
     sendJson(response, 200, await readAdCaptureControl(controlPath));
@@ -81,6 +98,34 @@ async function readAdCaptureControl(controlPath) {
   };
 }
 
+function resolveStore(config, requestedKey) {
+  const stores = config.stores ?? [];
+  return stores.find((store) => store.key === requestedKey) ?? stores[0] ?? {
+    key: "default",
+    name: "店铺",
+    url: "",
+    scraper: config.scraper
+  };
+}
+
+function buildStorePayload(config) {
+  const stores = config.stores ?? [];
+  return stores.map((store) => ({
+    key: store.key,
+    name: store.name,
+    url: store.url,
+    adAccountId: store.adAccountId || store.scraper?.adCapture?.adAccountId || "",
+    adAccountName: store.adAccountName || store.scraper?.adCapture?.adAccountName || "",
+    summaryUrl: publicDataUrl(store.scraper?.dashboardDataPath),
+    adSummaryUrl: publicDataUrl(store.scraper?.adCapture?.outputPath)
+  }));
+}
+
+function publicDataUrl(filePath) {
+  const relative = path.relative(publicDir, path.resolve(filePath ?? "")).replace(/\\/g, "/");
+  return relative && !relative.startsWith("..") ? `/${relative}` : "";
+}
+
 async function readRequestBody(request) {
   const chunks = [];
   for await (const chunk of request) {
@@ -95,7 +140,15 @@ function sendJson(response, statusCode, value) {
 }
 
 async function ensureInitialSummary(config) {
-  const resolved = path.resolve(config.scraper.dashboardDataPath);
+  const stores = config.stores?.length
+    ? config.stores
+    : [{ scraper: config.scraper }];
+
+  await Promise.all(stores.map((store) => ensureSummaryFile(config, store.scraper)));
+}
+
+async function ensureSummaryFile(config, scraper) {
+  const resolved = path.resolve(scraper.dashboardDataPath);
   try {
     await fs.access(resolved);
   } catch {
@@ -103,7 +156,7 @@ async function ensureInitialSummary(config) {
     await fs.writeFile(resolved, JSON.stringify({
       generatedAt: new Date().toISOString(),
       date: "",
-      storeTimezone: config.scraper.storeTimezone ?? "America/Anchorage",
+      storeTimezone: scraper.storeTimezone ?? "America/Anchorage",
       storeDate: "",
       selectedDate: "",
       availableDates: [],
@@ -129,7 +182,7 @@ async function ensureInitialSummary(config) {
         byUtmId: {},
         startAt: "",
         endAt: "",
-        timeZone: config.scraper.storeTimezone ?? "America/Anchorage",
+        timeZone: scraper.storeTimezone ?? "America/Anchorage",
         label: "店铺时间"
       },
       hourlyBuckets: [],

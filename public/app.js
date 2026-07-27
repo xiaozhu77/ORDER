@@ -5,6 +5,8 @@ let latestData = null;
 let latestAdData = null;
 let draggedMetricId = "";
 let adCapturePaused = false;
+let stores = [];
+let selectedStoreKey = localStorage.getItem("orderDashboard.selectedStore") || "";
 
 const metricOrderStorageKey = "orderDashboard.metricOrder";
 const adDataStorageKey = "orderDashboard.latestAdData";
@@ -19,6 +21,7 @@ const fallbackCurrency = {
 const elements = {
   subtitle: document.querySelector("#subtitle"),
   health: document.querySelector("#health"),
+  storeSwitcher: document.querySelector("#storeSwitcher"),
   adCaptureToggle: document.querySelector("#adCaptureToggle"),
   metrics: document.querySelector(".metrics"),
   totalOrders: document.querySelector("#totalOrders"),
@@ -47,17 +50,68 @@ elements.sortCount.addEventListener("click", () => setSort("count"));
 elements.sortAmount.addEventListener("click", () => setSort("amount"));
 elements.dateSwitcher.addEventListener("click", handleDateClick);
 elements.adCaptureToggle.addEventListener("click", toggleAdCapture);
+elements.storeSwitcher?.addEventListener("change", handleStoreChange);
 initMetricSorting();
-latestAdData = readStoredAdData();
 
-refresh();
+init();
 setInterval(refresh, 10000);
+
+async function init() {
+  await loadStores();
+  latestAdData = readStoredAdData();
+  refresh();
+}
 
 function setSort(nextSortBy) {
   sortBy = nextSortBy;
   elements.sortCount.classList.toggle("active", sortBy === "count");
   elements.sortAmount.classList.toggle("active", sortBy === "amount");
   refresh();
+}
+
+async function loadStores() {
+  stores = await fetchOptionalJson("/api/stores") || [];
+  if (!stores.length) {
+    stores = [{
+      key: "default",
+      name: "店铺",
+      summaryUrl: "/data/summary.json",
+      adSummaryUrl: "/data/ad-summary.json"
+    }];
+  }
+
+  if (!selectedStoreKey || !stores.some((store) => store.key === selectedStoreKey)) {
+    selectedStoreKey = stores[0].key;
+  }
+
+  renderStoreSwitcher();
+}
+
+function renderStoreSwitcher() {
+  if (!elements.storeSwitcher) return;
+  elements.storeSwitcher.innerHTML = stores.map((store) => (
+    `<option value="${escapeAttr(store.key)}">${escapeHtml(store.name || store.key)}</option>`
+  )).join("");
+  elements.storeSwitcher.value = selectedStoreKey;
+}
+
+function handleStoreChange(event) {
+  selectedStoreKey = event.target.value;
+  localStorage.setItem("orderDashboard.selectedStore", selectedStoreKey);
+  selectedDate = "";
+  selectedUtmId = "";
+  latestData = null;
+  latestAdData = readStoredAdData();
+  refresh();
+}
+
+function activeStore() {
+  return stores.find((store) => store.key === selectedStoreKey) ?? stores[0] ?? {
+    key: "default",
+    name: "店铺",
+    summaryUrl: "/data/summary.json",
+    adSummaryUrl: "/data/ad-summary.json"
+  };
 }
 
 function initMetricSorting() {
@@ -148,7 +202,7 @@ function saveMetricOrder() {
 
 function readStoredAdData() {
   try {
-    const value = JSON.parse(localStorage.getItem(adDataStorageKey) || "null");
+    const value = JSON.parse(localStorage.getItem(storeAdDataStorageKey()) || "null");
     return value?.status === "ok" ? value : null;
   } catch {
     return null;
@@ -157,21 +211,29 @@ function readStoredAdData() {
 
 function saveStoredAdData(adData) {
   try {
-    localStorage.setItem(adDataStorageKey, JSON.stringify(adData));
+    localStorage.setItem(storeAdDataStorageKey(), JSON.stringify(adData));
   } catch {
     // In-memory data still covers the current page when browser storage is unavailable.
   }
 }
 
+function storeAdDataStorageKey() {
+  return `${adDataStorageKey}.${selectedStoreKey || "default"}`;
+}
+
 async function refresh() {
   try {
     const timestamp = Date.now();
-    const [summaryResponse, adData] = await Promise.all([
-      fetch(`/data/summary.json?t=${timestamp}`),
-      fetchOptionalJson(`/data/ad-summary.json?t=${timestamp}`)
-    ]);
+    const store = activeStore();
+    const summaryUrl = store.summaryUrl || "/data/summary.json";
+    const summaryResponse = await fetch(`${summaryUrl}?t=${timestamp}`);
     const data = await summaryResponse.json();
-    const control = await fetchOptionalJson(`/api/ad-capture-control?t=${timestamp}`);
+    const targetDate = selectedDate && data.dailySummaries?.[selectedDate]
+      ? selectedDate
+      : data.selectedDate || data.storeDate || data.availableDates?.[0] || "";
+    const adSummaryUrl = adSummaryUrlForDate(store.adSummaryUrl || "/data/ad-summary.json", targetDate, data.selectedDate || data.storeDate);
+    const adData = await fetchOptionalJson(`${adSummaryUrl}?t=${timestamp}`);
+    const control = await fetchOptionalJson(`/api/ad-capture-control?store=${encodeURIComponent(store.key)}&t=${timestamp}`);
     renderAdCaptureControl(control);
     render(data, adData);
   } catch (error) {
@@ -179,11 +241,18 @@ async function refresh() {
   }
 }
 
+function adSummaryUrlForDate(baseUrl, targetDate, currentDate) {
+  if (!targetDate || targetDate === currentDate) return baseUrl;
+  const dotIndex = baseUrl.lastIndexOf(".");
+  if (dotIndex < 0) return `${baseUrl}-${targetDate}`;
+  return `${baseUrl.slice(0, dotIndex)}-${targetDate}${baseUrl.slice(dotIndex)}`;
+}
+
 async function toggleAdCapture() {
   const paused = !adCapturePaused;
   elements.adCaptureToggle.disabled = true;
   try {
-    const response = await fetch("/api/ad-capture-control", {
+    const response = await fetch(`/api/ad-capture-control?store=${encodeURIComponent(activeStore().key)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -235,8 +304,9 @@ function render(data, adData = latestAdData) {
   const health = data.health ?? {};
   const last60 = isCurrentDate ? (activeSummary.last60Minutes ?? {}) : emptyLast60();
   const currency = { ...fallbackCurrency, ...(data.currency ?? {}) };
+  const store = activeStore();
 
-  elements.subtitle.textContent = `店铺端 ${selectedDate || "-"} · 店铺时区 ${data.storeTimezone || "America/Anchorage"} · 更新时间 ${formatTime(data.generatedAt)} · ${currency.rateLabel}`;
+  elements.subtitle.textContent = `${store.name || store.key} · 店铺端 ${selectedDate || "-"} · 店铺时区 ${data.storeTimezone || "America/Anchorage"} · 更新时间 ${formatTime(data.generatedAt)} · ${currency.rateLabel}`;
   setHealth(Boolean(health.ok), health.message || "等待首次抓取");
   renderDateSwitcher(data.availableDates ?? [], data.selectedDate || data.storeDate);
   elements.totalOrders.textContent = totals.orderCount ?? 0;
@@ -308,7 +378,8 @@ function renderAdMetric(adData, currentDate) {
   }
 
   elements.adTotalSpend.textContent = moneyAd(adData.totalSpend ?? 0);
-  elements.adSpendInfo.textContent = `${adData.rowsChecked ?? 0} 个系列 · ${formatTime(adData.generatedAt)}`;
+  const sourceLabel = adData.totalSpendSource === "table-total" ? "页面总计" : "可见行合计";
+  elements.adSpendInfo.textContent = `${sourceLabel} · 明细 ${adData.rowsChecked ?? 0} 个系列 · ${formatTime(adData.generatedAt)}`;
 }
 
 function renderProfitMetric(totals, currency, adData, currentDate) {
@@ -362,7 +433,7 @@ function handleDateClick(event) {
   const button = event.target.closest("[data-date]");
   if (!button) return;
   selectedDate = button.dataset.date;
-  if (latestData) render(latestData, latestAdData);
+  refresh();
 }
 
 function renderContinuing(groups, last60, currency) {
