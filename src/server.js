@@ -80,9 +80,12 @@ async function handleAdCaptureControl(request, response, config, url) {
 
   const body = await readRequestBody(request);
   const payload = body ? JSON.parse(body) : {};
+  const previousState = await readAdCaptureControl(controlPath);
   const nextState = {
-    paused: Boolean(payload.paused),
-    reason: String(payload.reason ?? ""),
+    ...previousState,
+    paused: payload.paused === undefined ? previousState.paused : Boolean(payload.paused),
+    reason: payload.reason === undefined ? previousState.reason : String(payload.reason ?? ""),
+    targetDate: payload.targetDate === undefined ? previousState.targetDate : normalizeDate(payload.targetDate),
     updatedAt: new Date().toISOString()
   };
   await writeJson(controlPath, nextState);
@@ -94,8 +97,14 @@ async function readAdCaptureControl(controlPath) {
   return {
     paused: Boolean(control?.paused),
     reason: String(control?.reason ?? ""),
+    targetDate: normalizeDate(control?.targetDate),
     updatedAt: String(control?.updatedAt ?? "")
   };
+}
+
+function normalizeDate(value) {
+  const date = String(value ?? "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : "";
 }
 
 function resolveStore(config, requestedKey) {

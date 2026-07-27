@@ -20,6 +20,7 @@ export async function runAdSpendMonitor(options = {}) {
     outputPath: options.outputPath,
     refresh: options.refresh !== false,
     adAccountId: options.adAccountId ?? config.scraper.adCapture.adAccountId,
+    campaignPageUrl: options.campaignPageUrl ?? config.scraper.adCapture.campaignPageUrl,
     storeDate: options.storeDate ?? storeSummary.storeDate,
     orderSummaryGeneratedAt: storeSummary.generatedAt
   });
@@ -47,6 +48,8 @@ async function captureAdsPowerAdDataOnce(options = {}) {
     const browserResult = await readAdsPowerCampaignRows(debuggerEndpoint, {
       refresh: options.refresh !== false,
       adAccountId: options.adAccountId,
+      campaignPageUrl: options.campaignPageUrl,
+      storeDate: options.storeDate,
       connectTimeoutMs: options.connectTimeoutMs,
       readTimeoutMs: options.readTimeoutMs
     });
@@ -151,8 +154,29 @@ export function extractAdDate(url) {
   }
 }
 
+export function updateCampaignPageDateUrl(url, storeDate) {
+  const normalizedDate = normalizeText(storeDate);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate)) return url;
+
+  try {
+    const parsedUrl = new URL(url);
+    parsedUrl.searchParams.set("relative_time", "custom");
+    parsedUrl.searchParams.set("st", normalizedDate);
+    parsedUrl.searchParams.set("et", normalizedDate);
+    return parsedUrl.toString();
+  } catch {
+    return url;
+  }
+}
+
 export function isTargetCampaignPage(url, adAccountId = "") {
   if (!/ads\.tiktok\.com\/i18n\/manage\/campaign/.test(url)) return false;
+  const normalizedAdAccountId = normalizeText(adAccountId);
+  return !normalizedAdAccountId || extractAdAccountId(url) === normalizedAdAccountId;
+}
+
+export function isTikTokAdAccountPage(url, adAccountId = "") {
+  if (!/ads\.tiktok\.com\/i18n\/manage\//.test(url)) return false;
   const normalizedAdAccountId = normalizeText(adAccountId);
   return !normalizedAdAccountId || extractAdAccountId(url) === normalizedAdAccountId;
 }
@@ -196,7 +220,17 @@ async function getLatestDebuggerEndpoint(logDirPath) {
 }
 
 async function readAdsPowerCampaignRows(debuggerEndpoint, options = {}) {
-  if (options.refresh === false) {
+  const targetDate = normalizeText(options.storeDate);
+  const canOpenMissingPage = options.openMissingPage !== false;
+  if (options.campaignPageUrl && canOpenMissingPage) {
+    const directResult = await readAdsPowerCampaignRowsViaPageCdp(debuggerEndpoint, {
+      ...options,
+      navigateUrl: updateCampaignPageDateUrl(options.campaignPageUrl, targetDate)
+    }).catch(() => null);
+    if (directResult?.ok) return directResult;
+  }
+
+  if (options.refresh === false && !targetDate) {
     const quickResult = await readAdsPowerCampaignRowsViaPageCdp(debuggerEndpoint, options).catch(() => null);
     if (quickResult?.ok) return quickResult;
   }
@@ -207,13 +241,23 @@ async function readAdsPowerCampaignRows(debuggerEndpoint, options = {}) {
     const pages = browser
       .contexts()
       .flatMap((context) => context.pages());
-    const page = pages.find((candidate) => isTargetCampaignPage(candidate.url(), options.adAccountId));
+    let page = pages.find((candidate) => isTargetCampaignPage(candidate.url(), options.adAccountId));
+    if (!page && options.campaignPageUrl && canOpenMissingPage) {
+      page = pages.find((candidate) => isTikTokAdAccountPage(candidate.url(), options.adAccountId));
+      if (page) {
+        await navigateToCampaignUrl(page, updateCampaignPageDateUrl(options.campaignPageUrl, targetDate));
+      }
+    }
 
     if (!page) {
       return {
         ok: false,
         reason: "未找到当前打开的 TikTok Ads 推广系列页面"
       };
+    }
+
+    if (targetDate && extractAdDate(page.url()) !== targetDate) {
+      await gotoCampaignDate(page, targetDate);
     }
 
     if (options.refresh !== false) {
@@ -266,12 +310,28 @@ async function readAdsPowerCampaignRows(debuggerEndpoint, options = {}) {
 
 async function readAdsPowerCampaignRowsViaPageCdp(debuggerEndpoint, options = {}) {
   const pages = await listDevtoolsPages(debuggerEndpoint, options.connectTimeoutMs ?? 5000);
-  const pageInfo = pages.find((page) => page.type === "page" && isTargetCampaignPage(page.url, options.adAccountId));
+  let pageInfo = pages.find((page) => page.type === "page" && isTargetCampaignPage(page.url, options.adAccountId))
+    || (options.navigateUrl ? pages.find((page) => page.type === "page" && isRecoverableTikTokAdsPage(page, options.adAccountId)) : null);
+  if (options.navigateUrl && (!pageInfo || !pageInfo.url)) {
+    pageInfo = await openDevtoolsPage(debuggerEndpoint, options.navigateUrl, options.connectTimeoutMs ?? 5000);
+    if (pageInfo?.webSocketDebuggerUrl) {
+      await waitForCampaignRowsCdp(pageInfo.webSocketDebuggerUrl, options.navigateUrl, options.readTimeoutMs ?? 30000);
+    }
+  }
   if (!pageInfo?.webSocketDebuggerUrl) {
     return {
       ok: false,
       reason: "未找到当前打开的 TikTok Ads 推广系列页面"
     };
+  }
+
+  if (options.navigateUrl && (!isTargetCampaignPage(pageInfo.url, options.adAccountId) || extractAdDate(pageInfo.url) !== extractAdDate(options.navigateUrl))) {
+    await navigatePageCdp(pageInfo.webSocketDebuggerUrl, options.navigateUrl, options.readTimeoutMs ?? 30000).catch(async () => {
+      pageInfo = await openDevtoolsPage(debuggerEndpoint, options.navigateUrl, options.connectTimeoutMs ?? 5000);
+      if (pageInfo?.webSocketDebuggerUrl) {
+        await waitForCampaignRowsCdp(pageInfo.webSocketDebuggerUrl, options.navigateUrl, options.readTimeoutMs ?? 30000);
+      }
+    });
   }
 
   const data = await evaluatePageCdp(pageInfo.webSocketDebuggerUrl, `(() => {
@@ -309,8 +369,54 @@ async function readAdsPowerCampaignRowsViaPageCdp(debuggerEndpoint, options = {}
   };
 }
 
+function isRecoverableTikTokAdsPage(page, adAccountId = "") {
+  const url = String(page?.url ?? "");
+  if (isTikTokAdAccountPage(url, adAccountId)) return true;
+  return !url && /tiktok ads|advertising on tiktok/i.test(String(page?.title ?? ""));
+}
+
+async function navigatePageCdp(webSocketUrl, url, timeoutMs) {
+  await sendPageCdpCommand(webSocketUrl, "Page.enable", {}, timeoutMs);
+  await sendPageCdpCommand(webSocketUrl, "Page.navigate", { url }, timeoutMs);
+  await waitForCampaignRowsCdp(webSocketUrl, url, timeoutMs);
+}
+
+async function waitForCampaignRowsCdp(webSocketUrl, url, timeoutMs) {
+  const deadline = Date.now() + Math.max(15000, Number(timeoutMs));
+  while (Date.now() < deadline) {
+    const state = await evaluatePageCdp(webSocketUrl, `(() => ({
+      url: location.href,
+      hasRows: Boolean(document.querySelector("[slot^='cell-']"))
+    }))()`, 5000).catch(() => null);
+    if (state?.hasRows && isTargetCampaignPage(state.url) && extractAdDate(state.url) === extractAdDate(url)) return;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+}
+
+async function gotoCampaignDate(page, storeDate) {
+  const nextUrl = updateCampaignPageDateUrl(page.url(), storeDate);
+  if (nextUrl === page.url()) return;
+  await navigateToCampaignUrl(page, nextUrl);
+}
+
+async function navigateToCampaignUrl(page, url) {
+  try {
+    await page.goto(url, { waitUntil: "commit", timeout: 15000 });
+  } catch {
+    await page.evaluate((nextUrl) => {
+      window.location.assign(nextUrl);
+    }, url).catch(() => {});
+  }
+
+  await page.waitForURL((currentUrl) => {
+    const current = String(currentUrl);
+    return /ads\.tiktok\.com\/i18n\/manage\/campaign/.test(current) && extractAdDate(current) === extractAdDate(url);
+  }, { timeout: 45000 }).catch(() => {});
+  await page.waitForSelector("[slot^='cell-']", { timeout: 30000 });
+}
+
 async function listDevtoolsPages(debuggerEndpoint, timeoutMs) {
-  const baseUrl = debuggerEndpoint.replace(/^ws:/, "http:").replace(/\/devtools\/browser\/.*$/, "");
+  const baseUrl = devtoolsHttpBaseUrl(debuggerEndpoint);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -321,23 +427,46 @@ async function listDevtoolsPages(debuggerEndpoint, timeoutMs) {
   }
 }
 
+async function openDevtoolsPage(debuggerEndpoint, url, timeoutMs) {
+  const baseUrl = devtoolsHttpBaseUrl(debuggerEndpoint);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${baseUrl}/json/new?${encodeURIComponent(url)}`, {
+      method: "PUT",
+      signal: controller.signal
+    });
+    return response.ok ? await response.json() : null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function devtoolsHttpBaseUrl(debuggerEndpoint) {
+  return debuggerEndpoint.replace(/^ws:/, "http:").replace(/\/devtools\/browser\/.*$/, "");
+}
+
 function evaluatePageCdp(webSocketUrl, expression, timeoutMs) {
+  return sendPageCdpCommand(webSocketUrl, "Runtime.evaluate", {
+    expression,
+    awaitPromise: true,
+    returnByValue: true
+  }, timeoutMs).then((result) => result?.result?.value ?? {});
+}
+
+function sendPageCdpCommand(webSocketUrl, method, params, timeoutMs) {
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(webSocketUrl);
     const timeout = setTimeout(() => {
       socket.close();
-      reject(new Error(`page CDP evaluate timeout ${timeoutMs}ms`));
+      reject(new Error(`page CDP ${method} timeout ${timeoutMs}ms`));
     }, timeoutMs);
 
     socket.addEventListener("open", () => {
       socket.send(JSON.stringify({
         id: 1,
-        method: "Runtime.evaluate",
-        params: {
-          expression,
-          awaitPromise: true,
-          returnByValue: true
-        }
+        method,
+        params
       }));
     });
 
@@ -354,7 +483,7 @@ function evaluatePageCdp(webSocketUrl, expression, timeoutMs) {
         reject(new Error(message.result.exceptionDetails.text || "page CDP evaluate exception"));
         return;
       }
-      resolve(message.result?.result?.value ?? {});
+      resolve(message.result);
     });
 
     socket.addEventListener("error", () => {

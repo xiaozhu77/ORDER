@@ -7,6 +7,7 @@ let draggedMetricId = "";
 let adCapturePaused = false;
 let stores = [];
 let selectedStoreKey = localStorage.getItem("orderDashboard.selectedStore") || "";
+const syncedAdCaptureTargetDates = {};
 
 const metricOrderStorageKey = "orderDashboard.metricOrder";
 const adDataStorageKey = "orderDashboard.latestAdData";
@@ -96,6 +97,8 @@ function renderStoreSwitcher() {
 }
 
 function handleStoreChange(event) {
+  const previousStoreKey = selectedStoreKey;
+  clearAdCaptureTargetDate(previousStoreKey);
   selectedStoreKey = event.target.value;
   localStorage.setItem("orderDashboard.selectedStore", selectedStoreKey);
   selectedDate = "";
@@ -268,6 +271,38 @@ async function toggleAdCapture() {
   }
 }
 
+async function syncAdCaptureTargetDate(targetDate) {
+  const store = activeStore();
+  if (!store?.key || !targetDate) return;
+  if (syncedAdCaptureTargetDates[store.key] === targetDate) return;
+  syncedAdCaptureTargetDates[store.key] = targetDate;
+
+  try {
+    await fetch(`/api/ad-capture-control?store=${encodeURIComponent(store.key)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ targetDate })
+    });
+  } catch {
+    delete syncedAdCaptureTargetDates[store.key];
+  }
+}
+
+async function clearAdCaptureTargetDate(storeKey) {
+  if (!storeKey) return;
+  delete syncedAdCaptureTargetDates[storeKey];
+
+  try {
+    await fetch(`/api/ad-capture-control?store=${encodeURIComponent(storeKey)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ targetDate: "" })
+    });
+  } catch {
+    // The next active-store sync will repair the control file.
+  }
+}
+
 function renderAdCaptureControl(control) {
   adCapturePaused = Boolean(control?.paused);
   elements.adCaptureToggle.classList.toggle("paused", adCapturePaused);
@@ -297,6 +332,7 @@ function render(data, adData = latestAdData) {
   if (!selectedDate || !(data.dailySummaries?.[selectedDate])) {
     selectedDate = data.selectedDate || data.storeDate || data.availableDates?.[0] || "";
   }
+  syncAdCaptureTargetDate(selectedDate);
   const displayAdData = latestAdData;
   const activeSummary = data.dailySummaries?.[selectedDate] ?? data;
   const isCurrentDate = selectedDate === (data.selectedDate || data.storeDate);
@@ -433,6 +469,7 @@ function handleDateClick(event) {
   const button = event.target.closest("[data-date]");
   if (!button) return;
   selectedDate = button.dataset.date;
+  syncAdCaptureTargetDate(selectedDate);
   refresh();
 }
 

@@ -7,10 +7,12 @@ import {
   captureAdsPowerAdData,
   extractAdAccountId,
   isTargetCampaignPage,
+  isTikTokAdAccountPage,
   normalizeAmount,
   normalizeCampaignRow,
   normalizePercent,
-  sumSpend
+  sumSpend,
+  updateCampaignPageDateUrl
 } from "../src/ad-spend-monitor.js";
 
 test("normalizes visible campaign row fields", () => {
@@ -61,6 +63,23 @@ test("matches the configured TikTok ad account page", () => {
   assert.equal(extractAdAccountId(resepedUrl), "7618477796998119432");
   assert.equal(isTargetCampaignPage(resepedUrl, "7618477796998119432"), true);
   assert.equal(isTargetCampaignPage(otherUrl, "7618477796998119432"), false);
+});
+
+test("matches non-campaign TikTok Ads pages for the configured account", () => {
+  const creativeUrl = "https://ads.tiktok.com/i18n/manage/creative?aadvid=7618477796998119432&st=2026-07-27&et=2026-07-27";
+
+  assert.equal(isTargetCampaignPage(creativeUrl, "7618477796998119432"), false);
+  assert.equal(isTikTokAdAccountPage(creativeUrl, "7618477796998119432"), true);
+});
+
+test("updates TikTok campaign page date parameters", () => {
+  const original = "https://ads.tiktok.com/i18n/manage/campaign?aadvid=7618477796998119432&relative_time=today&st=2026-07-24&et=2026-07-24";
+  const updated = new URL(updateCampaignPageDateUrl(original, "2026-07-25"));
+
+  assert.equal(updated.searchParams.get("aadvid"), "7618477796998119432");
+  assert.equal(updated.searchParams.get("relative_time"), "custom");
+  assert.equal(updated.searchParams.get("st"), "2026-07-25");
+  assert.equal(updated.searchParams.get("et"), "2026-07-25");
 });
 
 test("sums campaign spend", () => {

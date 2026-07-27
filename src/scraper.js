@@ -120,10 +120,14 @@ async function captureAdsAfterOrderScrape(scraper, summary, options = {}) {
       return;
     }
 
-    const storeDate = summary?.selectedDate ?? summary?.storeDate ?? "";
+    const currentStoreDate = summary?.selectedDate ?? summary?.storeDate ?? "";
+    const storeDate = control.targetDate || currentStoreDate;
     const outputPath = scraper.adCapture?.outputPath;
+    const activeOutputPath = storeDate && currentStoreDate && storeDate !== currentStoreDate
+      ? datedAdOutputPath(outputPath, storeDate)
+      : outputPath;
     const intervalMinutes = Math.max(0, Number(scraper.adCapture?.intervalMinutes ?? 0));
-    const cachedResult = await readFreshAdCapture(outputPath, storeDate, intervalMinutes);
+    const cachedResult = await readFreshAdCapture(activeOutputPath, storeDate, intervalMinutes);
     if (cachedResult) {
       console.log(`广告端沿用缓存 ${cachedResult.rowsChecked ?? 0} 个系列，总花费 $${formatMoney(cachedResult.totalSpend ?? 0)}，${intervalMinutes} 分钟刷新一次。`);
       return;
@@ -132,13 +136,15 @@ async function captureAdsAfterOrderScrape(scraper, summary, options = {}) {
     const result = await captureAdsPowerAdData({
       refresh: options.refresh ?? scraper.adCapture?.refreshBeforeRead !== false,
       adAccountId: scraper.adCapture?.adAccountId,
+      campaignPageUrl: scraper.adCapture?.campaignPageUrl,
+      openMissingPage: Boolean(control.targetDate),
       storeDate,
       orderSummaryGeneratedAt: summary?.generatedAt ?? ""
     });
 
     if (result.status === "ok") {
       if (result.storeDate && storeDate && result.storeDate !== storeDate) {
-        const datedOutputPath = datedAdOutputPath(outputPath, result.storeDate);
+        const datedOutputPath = result.storeDate === currentStoreDate ? outputPath : datedAdOutputPath(outputPath, result.storeDate);
         if (datedOutputPath) {
           await writeJson(datedOutputPath, result);
           console.warn(`广告页日期 ${result.storeDate} 与当前店铺日 ${storeDate} 不一致，已写入历史广告文件，未覆盖当前日广告。`);
@@ -147,8 +153,8 @@ async function captureAdsAfterOrderScrape(scraper, summary, options = {}) {
       }
       const modeText = (options.refresh ?? scraper.adCapture?.refreshBeforeRead !== false) ? "已执行广告端刷新" : "快速读取";
       console.log(`广告端 ${modeText}，${result.rowsChecked} 个系列，总花费 $${formatMoney(result.totalSpend)}，已保存。`);
-      if (outputPath) {
-        await writeJson(outputPath, result);
+      if (activeOutputPath) {
+        await writeJson(activeOutputPath, result);
       }
       return result;
     }
@@ -190,8 +196,14 @@ async function readAdCaptureControl(controlPath) {
   return {
     paused: Boolean(control?.paused),
     reason: String(control?.reason ?? ""),
+    targetDate: normalizeDate(control?.targetDate),
     updatedAt: String(control?.updatedAt ?? "")
   };
+}
+
+function normalizeDate(value) {
+  const date = String(value ?? "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : "";
 }
 
 export async function scrapeOrders(page, backend) {
