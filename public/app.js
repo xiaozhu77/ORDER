@@ -24,6 +24,7 @@ const elements = {
   health: document.querySelector("#health"),
   storeSwitcher: document.querySelector("#storeSwitcher"),
   adCaptureToggle: document.querySelector("#adCaptureToggle"),
+  testAlertSound: document.querySelector("#testAlertSound"),
   metrics: document.querySelector(".metrics"),
   totalOrders: document.querySelector("#totalOrders"),
   totalAmount: document.querySelector("#totalAmount"),
@@ -51,6 +52,7 @@ elements.sortCount.addEventListener("click", () => setSort("count"));
 elements.sortAmount.addEventListener("click", () => setSort("amount"));
 elements.dateSwitcher.addEventListener("click", handleDateClick);
 elements.adCaptureToggle.addEventListener("click", toggleAdCapture);
+elements.testAlertSound?.addEventListener("click", testAlertSound);
 elements.storeSwitcher?.addEventListener("change", handleStoreChange);
 initMetricSorting();
 
@@ -271,6 +273,72 @@ async function toggleAdCapture() {
   }
 }
 
+async function testAlertSound() {
+  if (!elements.testAlertSound) return;
+  elements.testAlertSound.disabled = true;
+  elements.testAlertSound.textContent = "播放中...";
+  try {
+    await playConfiguredAlertSound();
+    elements.testAlertSound.textContent = "已播放";
+    window.setTimeout(() => {
+      elements.testAlertSound.textContent = "测试提示音";
+      elements.testAlertSound.disabled = false;
+    }, 900);
+  } catch (error) {
+    elements.testAlertSound.textContent = `播放失败：${error.message}`;
+    window.setTimeout(() => {
+      elements.testAlertSound.textContent = "测试提示音";
+      elements.testAlertSound.disabled = false;
+    }, 1600);
+  }
+}
+
+async function playConfiguredAlertSound() {
+  const sound = new Audio(`/api/alert-sound?store=${encodeURIComponent(activeStore().key)}&t=${Date.now()}`);
+  sound.volume = 0.85;
+  try {
+    await sound.play();
+    await new Promise((resolve) => {
+      sound.addEventListener("ended", resolve, { once: true });
+      window.setTimeout(resolve, 1500);
+    });
+  } catch {
+    await playSoftBrowserTone();
+  }
+}
+
+async function playSoftBrowserTone() {
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) throw new Error("浏览器不支持音频");
+
+  const audio = new AudioContext();
+  const master = audio.createGain();
+  master.gain.value = 0.18;
+  master.connect(audio.destination);
+
+  const notes = [
+    { frequency: 620, start: 0, duration: 0.17 },
+    { frequency: 710, start: 0.31, duration: 0.17 }
+  ];
+
+  for (const note of notes) {
+    const oscillator = audio.createOscillator();
+    const gain = audio.createGain();
+    oscillator.type = "sine";
+    oscillator.frequency.value = note.frequency;
+    gain.gain.setValueAtTime(0, audio.currentTime + note.start);
+    gain.gain.linearRampToValueAtTime(0.9, audio.currentTime + note.start + 0.025);
+    gain.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + note.start + note.duration);
+    oscillator.connect(gain);
+    gain.connect(master);
+    oscillator.start(audio.currentTime + note.start);
+    oscillator.stop(audio.currentTime + note.start + note.duration + 0.02);
+  }
+
+  await new Promise((resolve) => window.setTimeout(resolve, 620));
+  await audio.close();
+}
+
 async function syncAdCaptureTargetDate(targetDate) {
   const store = activeStore();
   if (!store?.key || !targetDate) return;
@@ -371,8 +439,10 @@ function render(data, adData = latestAdData) {
   elements.summaryRows.innerHTML = groups.map((group, index) => {
     const last60Group = last60.byUtmId?.[group.utmId];
     const adRow = adsByCampaignId.get(group.utmId);
+    const orderRoi = calculateOrderRoi(group, adRow);
+    const roiLevel = getRoiLevel(orderRoi);
     return `
-      <tr>
+      <tr class="${roiLevel ? `${roiLevel}RoiRow` : ""}">
         <td>
           <div class="utmCell">
             <span class="rank">${String(index + 1).padStart(2, "0")}</span>
@@ -382,15 +452,12 @@ function render(data, adData = latestAdData) {
         </td>
         <td><strong>${group.orderCount}</strong></td>
         <td>
-          <div class="moneyStack">
-            <strong>${moneyGbp(group.totalAmount, currency)}</strong>
-            <small>${moneyUsd(group.totalAmount, currency)}</small>
-          </div>
+          ${renderOrderAmountWithRoi(group, currency, orderRoi)}
         </td>
         <td>${renderAdSpend(adRow)}</td>
         <td>${renderAdStatus(adRow)}</td>
         <td>${renderAdCpcCtr(adRow)}</td>
-        <td>${escapeHtml(group.latestOrderTime || "-")}</td>
+        <td>${renderOrderTime(group.latestOrderTime, data.storeTimezone)}</td>
         <td>${renderStatus(group.statusCounts)}</td>
       </tr>
     `;
@@ -438,6 +505,31 @@ function isAdDataAvailable(adData, currentDate) {
   if (!adData || adData.status !== "ok") return false;
   if (adData.storeDate && currentDate && adData.storeDate !== currentDate) return false;
   return Array.isArray(adData.rows);
+}
+
+function calculateOrderRoi(group, adRow) {
+  const orderAmountGbp = Number(group?.totalAmount ?? 0);
+  const adSpend = Number(adRow?.spend ?? 0);
+  if (!Number.isFinite(orderAmountGbp) || !Number.isFinite(adSpend) || adSpend <= 0) return null;
+  return orderAmountGbp / adSpend;
+}
+
+function renderOrderAmountWithRoi(group, currency, orderRoi) {
+  const roiLabel = orderRoi === null ? "ROI -" : `ROI ${formatNumber(orderRoi, 2)}`;
+  const roiLevel = getRoiLevel(orderRoi);
+  return `
+    <div class="moneyStack orderAmountStack ${roiLevel ? `${roiLevel}RoiAmount` : ""}">
+      <strong>${moneyGbp(group.totalAmount, currency)}</strong>
+      <small>${moneyUsd(group.totalAmount, currency)} · ${escapeHtml(roiLabel)}</small>
+    </div>
+  `;
+}
+
+function getRoiLevel(orderRoi) {
+  if (orderRoi === null) return "";
+  if (orderRoi < 2) return "low";
+  if (orderRoi < 2.2) return "warning";
+  return "";
 }
 
 function renderAdSpend(adRow) {
@@ -543,7 +635,7 @@ function renderOrderChart(data, activeSummary, utmId) {
   const totalOrders = points.reduce((sum, point) => sum + point.count, 0);
   const peak = points.reduce((best, point) => point.count > best.count ? point : best, points[0]);
 
-  elements.chartInfo.textContent = `${utmId} · 店铺端 ${storeDate || "今天"} · 共 ${totalOrders} 单 · 峰值 ${peak.label} / 北京 ${toBeijingHourLabel(peak.hour)} ${peak.count} 单`;
+  elements.chartInfo.textContent = `${utmId} · 店铺端 ${storeDate || "今天"} · 共 ${totalOrders} 单 · 峰值 ${peak.label} / 本地 ${toLocalHourLabel(peak.hour, storeDate, latestData?.storeTimezone)} ${peak.count} 单`;
 
   if (!orders.length) {
     elements.orderChart.innerHTML = '<div class="emptyState">该 UTM ID 今天暂无订单</div>';
@@ -557,7 +649,7 @@ function buildHourlySeries(orders) {
   const points = Array.from({ length: 24 }, (_, hour) => ({
     hour,
     label: `${String(hour).padStart(2, "0")}:00`,
-    beijingLabel: toBeijingHourLabel(hour),
+    localLabel: toLocalHourLabel(hour, selectedDate, latestData?.storeTimezone),
     count: 0
   }));
 
@@ -606,7 +698,7 @@ function lineChartSvg(points) {
             ${point.count ? `<text class="pointLabel" x="${x.toFixed(2)}" y="${labelY.toFixed(2)}">${point.count}</text>` : ""}
             ${index % 3 === 0 ? `
               <text class="xLabel" x="${x.toFixed(2)}" y="${height - 34}">店 ${point.label.slice(0, 2)}</text>
-              <text class="xLabel beijingLabel" x="${x.toFixed(2)}" y="${height - 14}">京 ${point.beijingLabel.slice(0, 2)}</text>
+              <text class="xLabel localLabel" x="${x.toFixed(2)}" y="${height - 14}">本 ${point.localLabel.slice(0, 2)}</text>
             ` : ""}
           </g>
         `;
@@ -617,9 +709,64 @@ function lineChartSvg(points) {
   `;
 }
 
-function toBeijingHourLabel(storeHour) {
-  const beijingHour = (Number(storeHour) + 16) % 24;
-  return `${String(beijingHour).padStart(2, "0")}:00`;
+function renderOrderTime(storeDateTime, storeTimezone) {
+  if (!storeDateTime) return "-";
+  const local = storeDateTimeToLocalDate(storeDateTime, storeTimezone);
+  if (!local) return escapeHtml(storeDateTime);
+  return `
+    <div class="moneyStack orderTimeStack">
+      <strong>${escapeHtml(formatLocalDateTime(local))}</strong>
+      <small>店铺 ${escapeHtml(storeDateTime)}</small>
+    </div>
+  `;
+}
+
+function toLocalHourLabel(storeHour, storeDate, storeTimezone) {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(storeDate ?? "")) ? storeDate : selectedDate;
+  const storeDateTime = `${date} ${String(storeHour).padStart(2, "0")}:00:00`;
+  const local = storeDateTimeToLocalDate(storeDateTime, storeTimezone);
+  if (!local) return `${String(storeHour).padStart(2, "0")}:00`;
+  return `${String(local.getHours()).padStart(2, "0")}:00`;
+}
+
+function storeDateTimeToLocalDate(storeDateTime, storeTimezone = "America/Anchorage") {
+  const match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/.exec(String(storeDateTime ?? "").trim());
+  if (!match) return null;
+
+  const [, year, month, day, hour, minute, second = "00"] = match;
+  const utcGuess = Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
+  const offsetMs = timezoneOffsetMs(new Date(utcGuess), storeTimezone);
+  return new Date(utcGuess - offsetMs);
+}
+
+function timezoneOffsetMs(date, timeZone) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  }).formatToParts(date).reduce((acc, part) => {
+    acc[part.type] = part.value;
+    return acc;
+  }, {});
+
+  const asUtc = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour),
+    Number(parts.minute),
+    Number(parts.second)
+  );
+  return asUtc - date.getTime();
+}
+
+function formatLocalDateTime(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}:${String(date.getSeconds()).padStart(2, "0")}`;
 }
 
 function setHealth(ok, message) {

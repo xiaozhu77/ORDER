@@ -19,10 +19,11 @@
     "alerts": {
       "enabled": true,
       "repeat": 2,
-      "durationMs": 250,
-      "gapMs": 120,
-      "startFrequency": 1200,
-      "stepFrequency": 200
+      "durationMs": 170,
+      "gapMs": 140,
+      "startFrequency": 620,
+      "stepFrequency": 90,
+      "soundPath": ""
     },
     "timezone": "Asia/Shanghai",
     "storeTimezone": "America/Anchorage",

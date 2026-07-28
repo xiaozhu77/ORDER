@@ -222,7 +222,7 @@ async function getLatestDebuggerEndpoint(logDirPath) {
 async function readAdsPowerCampaignRows(debuggerEndpoint, options = {}) {
   const targetDate = normalizeText(options.storeDate);
   const canOpenMissingPage = options.openMissingPage !== false;
-  if (options.campaignPageUrl && canOpenMissingPage) {
+  if (options.refresh === false && options.campaignPageUrl && canOpenMissingPage) {
     const directResult = await readAdsPowerCampaignRowsViaPageCdp(debuggerEndpoint, {
       ...options,
       navigateUrl: updateCampaignPageDateUrl(options.campaignPageUrl, targetDate)

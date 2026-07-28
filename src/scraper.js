@@ -58,6 +58,7 @@ export async function runScraper(config) {
         });
         if (existingOrderNumbers.size > 0 && scrapeResult.orders.length > 0) {
           await playNewOrderAlert(scraper.alerts, scrapeResult.orders.length);
+          await writeLastAlert(scraper, scrapeResult.orders);
           console.log(`检测到 ${scrapeResult.orders.length} 个新订单，已播放提示音。`);
         }
         console.log(`[${startedAt.toLocaleString()}] 店铺端今天 ${summary.totals.orderCount} 单，最近60分钟 ${summary.last60Minutes.orderCount} 单`);
@@ -71,6 +72,15 @@ export async function runScraper(config) {
   } finally {
     await browser.close();
   }
+}
+
+async function writeLastAlert(scraper, orders) {
+  const outputPath = path.join(path.dirname(path.resolve(scraper.ordersOutputPath)), "last-alert.json");
+  await writeJson(outputPath, {
+    alertedAt: new Date().toISOString(),
+    orderCount: orders.length,
+    orderNumbers: orders.map((order) => order.orderNumber).filter(Boolean)
+  });
 }
 
 export async function runAdCaptureLoop(config) {

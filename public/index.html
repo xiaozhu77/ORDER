@@ -7,123 +7,143 @@
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
-    <main class="shell">
-      <header class="topbar">
+    <div class="dynamicBackground" aria-hidden="true">
+      <div class="orbit orbitOne"></div>
+      <div class="orbit orbitTwo"></div>
+      <div class="orbit orbitThree"></div>
+      <div class="wireObject wireObjectA"><span></span><span></span><span></span><span></span></div>
+      <div class="wireObject wireObjectB"><span></span><span></span><span></span><span></span><span></span></div>
+      <div class="ringObject ringObjectA"><span></span><span></span><span></span></div>
+      <div class="ringObject ringObjectB"><span></span><span></span><span></span></div>
+      <div class="barObject barObjectA"><span></span><span></span><span></span><span></span><span></span></div>
+      <div class="barObject barObjectB"><span></span><span></span><span></span><span></span><span></span></div>
+    </div>
+    <main class="layoutShell">
+      <aside class="sidebar">
         <div class="brandBlock">
           <div class="eyebrow"><span class="pulse"></span> LIVE ORDER INTEL</div>
           <h1>实时订单指挥台</h1>
           <p id="subtitle">等待数据同步</p>
         </div>
-        <button id="adCaptureToggle" class="adCaptureToggle" type="button">暂停广告抓取</button>
-        <label class="storeSwitcherLabel">
-          <span>店铺</span>
-          <select id="storeSwitcher" class="storeSwitcher"></select>
-        </label>
-        <div id="health" class="health">
-          <span class="healthDot"></span>
-          <span>等待首次抓取</span>
-        </div>
-      </header>
 
-      <section class="dateSwitcherSection">
-        <div class="dateSwitcherHeader">
-          <span>店铺日期</span>
-          <strong id="selectedDateLabel">-</strong>
-        </div>
-        <div id="dateSwitcher" class="dateSwitcher"></div>
-      </section>
+        <section class="filterPanel">
+          <label class="storeSwitcherLabel">
+            <span>店铺</span>
+            <select id="storeSwitcher" class="storeSwitcher"></select>
+          </label>
 
-      <section class="metrics">
-        <article data-metric-id="totalOrders" draggable="true">
-          <div class="metricIcon">#</div>
-          <span>所选日期订单</span>
-          <strong id="totalOrders">0</strong>
-        </article>
-        <article data-metric-id="last60Orders" draggable="true">
-          <div class="metricIcon">60</div>
-          <span>最近60分钟订单</span>
-          <strong id="last60Orders">0</strong>
-          <small id="last60Amount">£0.00 / $0.00</small>
-        </article>
-        <article data-metric-id="totalAmount" draggable="true">
-          <div class="metricIcon">£</div>
-          <span>订单总金额</span>
-          <strong id="totalAmount">£0.00</strong>
-          <small id="totalUsd">$0.00</small>
-        </article>
-        <article data-metric-id="recognizedOrders" draggable="true">
-          <div class="metricIcon">ID</div>
-          <span>已识别 / 未识别</span>
-          <strong id="recognizedOrders">0 / 0</strong>
-        </article>
-        <article data-metric-id="profitCny" draggable="true">
-          <div class="metricIcon">¥</div>
-          <span>盈利</span>
-          <strong id="profitCny">¥0.00</strong>
-          <small id="profitInfo">按订单美元金额和广告花费估算</small>
-        </article>
-        <article data-metric-id="adTotalSpend" draggable="true">
-          <div class="metricIcon">$</div>
-          <span>广告总花费</span>
-          <strong id="adTotalSpend">$0.00</strong>
-          <small id="adSpendInfo">广告数据暂不可用</small>
-        </article>
-      </section>
+          <div class="dateSwitcherSection">
+            <div class="dateSwitcherHeader">
+              <span>店铺日期</span>
+              <strong id="selectedDateLabel">-</strong>
+            </div>
+            <div id="dateSwitcher" class="dateSwitcher"></div>
+          </div>
 
-      <section class="continuingSection">
-        <div class="sectionTitle">
+          <button id="adCaptureToggle" class="adCaptureToggle" type="button">暂停广告抓取</button>
+          <button id="testAlertSound" class="testAlertSound" type="button">测试提示音</button>
+
+          <div id="health" class="health">
+            <span class="healthDot"></span>
+            <span>等待首次抓取</span>
+          </div>
+        </section>
+
+        <section class="sideStats">
           <div>
-            <h2>双日持续出单 ID</h2>
-            <p id="continuingInfo">今天和昨天都有出单的 UTM ID</p>
+            <span>最近 60 分钟</span>
+            <strong id="last60Orders">0</strong>
+            <small id="last60Amount">£0.00 / $0.00</small>
           </div>
-        </div>
-        <div id="continuingRows" class="continuingGrid">
-          <div class="emptyState">暂无数据</div>
-        </div>
-      </section>
-
-      <section class="chartSection">
-        <div class="sectionTitle">
           <div>
-            <h2>UTM ID 日内订单曲线</h2>
-            <p id="chartInfo">点击任意 UTM ID 查看今天一天内的订单时间序列</p>
+            <span>识别 / 未识别</span>
+            <strong id="recognizedOrders">0 / 0</strong>
+            <small>UTM 识别状态</small>
           </div>
-        </div>
-        <div id="orderChart" class="chartBox">
-          <div class="emptyState">等待选择 UTM ID</div>
-        </div>
-      </section>
+        </section>
+      </aside>
 
-      <section class="tableSection">
-        <div class="sectionTitle">
-          <div>
-            <h2>UTM ID 火力分布</h2>
-            <p id="scrapeInfo">每 10 秒刷新前端数据</p>
+      <section class="mainContent">
+        <section class="metrics" aria-label="核心经营指标">
+          <article data-metric-id="totalOrders" draggable="true">
+            <span>订单数</span>
+            <strong id="totalOrders">0</strong>
+            <small>所选日期</small>
+          </article>
+          <article data-metric-id="totalAmount" draggable="true">
+            <span>订单金额</span>
+            <strong id="totalAmount">£0.00</strong>
+            <small id="totalUsd">$0.00</small>
+          </article>
+          <article data-metric-id="adTotalSpend" draggable="true">
+            <span>广告消耗</span>
+            <strong id="adTotalSpend">$0.00</strong>
+            <small id="adSpendInfo">等待广告数据</small>
+          </article>
+          <article data-metric-id="profitCny" draggable="true">
+            <span>利润估算</span>
+            <strong id="profitCny">¥0.00</strong>
+            <small id="profitInfo">按订单美元金额和广告花费估算</small>
+          </article>
+        </section>
+
+        <section class="insightGrid">
+          <section class="continuingSection">
+            <div class="sectionTitle">
+              <div>
+                <h2>双日持续出单 ID</h2>
+                <p id="continuingInfo">今天和昨天都有出单的 UTM ID</p>
+              </div>
+            </div>
+            <div id="continuingRows" class="continuingGrid">
+              <div class="emptyState">暂无数据</div>
+            </div>
+          </section>
+
+          <section class="chartSection">
+            <div class="sectionTitle">
+              <div>
+                <h2>UTM ID 日内订单曲线</h2>
+                <p id="chartInfo">点击任意 UTM ID 查看所选日期的订单时间序列</p>
+              </div>
+            </div>
+            <div id="orderChart" class="chartBox">
+              <div class="emptyState">等待选择 UTM ID</div>
+            </div>
+          </section>
+        </section>
+
+        <section class="tableSection">
+          <div class="sectionTitle tableTitle">
+            <div>
+              <h2>UTM ID 火力分布</h2>
+              <p id="scrapeInfo">每 10 秒刷新前端数据</p>
+            </div>
+            <div class="sortControls">
+              <button id="sortCount" class="active" type="button">订单数</button>
+              <button id="sortAmount" type="button">金额</button>
+            </div>
           </div>
-          <div class="sortControls">
-            <button id="sortCount" class="active" type="button">订单数</button>
-            <button id="sortAmount" type="button">金额</button>
+          <div class="tableWrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>UTM ID</th>
+                  <th>订单数量</th>
+                  <th>订单金额</th>
+                  <th>广告消耗</th>
+                  <th>广告状态</th>
+                  <th>CPC / CTR</th>
+                  <th>最新订单时间（本地）</th>
+                  <th>状态分布</th>
+                </tr>
+              </thead>
+              <tbody id="summaryRows">
+                <tr><td colspan="8">暂无数据</td></tr>
+              </tbody>
+            </table>
           </div>
-        </div>
-        <div class="tableWrap">
-          <table>
-            <thead>
-              <tr>
-                <th>UTM ID</th>
-                <th>订单数量</th>
-                <th>订单金额</th>
-                <th>广告消耗</th>
-                <th>广告状态</th>
-                <th>CPC / CTR</th>
-                <th>最新订单时间</th>
-                <th>状态分布</th>
-              </tr>
-            </thead>
-            <tbody id="summaryRows">
-              <tr><td colspan="8">暂无数据</td></tr>
-            </tbody>
-          </table>
-        </div>
+        </section>
       </section>
     </main>
     <script src="/app.js"></script>

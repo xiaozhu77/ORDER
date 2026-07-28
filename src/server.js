@@ -25,6 +25,11 @@ export async function startServer(config) {
         return;
       }
 
+      if (url.pathname === "/api/alert-sound") {
+        await handleAlertSound(request, response, config, url);
+        return;
+      }
+
       const pathname = url.pathname === "/" ? "/index.html" : decodeURIComponent(url.pathname);
       const filePath = path.resolve(publicDir, `.${pathname}`);
 
@@ -62,6 +67,28 @@ export async function startServer(config) {
   });
   console.log(`看板已启动: http://${dashboard.host}:${dashboard.port}`);
   return server;
+}
+
+async function handleAlertSound(request, response, config, url) {
+  if (request.method !== "GET") {
+    sendJson(response, 405, { error: "Method not allowed" });
+    return;
+  }
+
+  const store = resolveStore(config, url.searchParams.get("store"));
+  const soundPath = store.scraper?.alerts?.soundPath || config.scraper?.alerts?.soundPath || "";
+  if (!soundPath) {
+    sendJson(response, 404, { error: "No alert sound configured" });
+    return;
+  }
+
+  const resolved = path.resolve(soundPath);
+  const data = await fs.readFile(resolved);
+  response.writeHead(200, {
+    "content-type": contentType(resolved),
+    "cache-control": "no-store"
+  });
+  response.end(data);
 }
 
 async function handleAdCaptureControl(request, response, config, url) {
@@ -213,7 +240,8 @@ function contentType(filePath) {
     ".html": "text/html; charset=utf-8",
     ".css": "text/css; charset=utf-8",
     ".js": "text/javascript; charset=utf-8",
-    ".json": "application/json; charset=utf-8"
+    ".json": "application/json; charset=utf-8",
+    ".wav": "audio/wav"
   }[ext] ?? "application/octet-stream";
 }
 
