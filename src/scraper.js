@@ -87,15 +87,29 @@ export async function runAdCaptureLoop(config) {
   const scraper = config.scraper;
   if (scraper.adCapture?.enabled === false) return;
   let lastRefreshAt = 0;
+  let lastRefreshRequestedAt = "";
 
   while (true) {
     const startedAt = new Date();
     try {
       const summary = await readJson(scraper.dashboardDataPath, null);
       if (summary) {
+        const control = await readAdCaptureControl(scraper.adCapture?.controlPath);
+        if (control.paused) {
+          if (control.refreshRequestedAt) {
+            lastRefreshRequestedAt = control.refreshRequestedAt;
+          }
+          const pollSeconds = Math.max(3, Number(scraper.adCapture?.pollSeconds ?? 8));
+          await sleep(pollSeconds * 1000);
+          continue;
+        }
+        const forceRefresh = Boolean(control.refreshRequestedAt && control.refreshRequestedAt !== lastRefreshRequestedAt);
         const refreshEveryMs = Math.max(0, Number(scraper.adCapture?.refreshEverySeconds ?? 60)) * 1000;
-        const shouldRefresh = refreshEveryMs > 0 && Date.now() - lastRefreshAt >= refreshEveryMs;
-        const result = await captureAdsAfterOrderScrape(scraper, summary, { refresh: shouldRefresh });
+        const shouldRefresh = forceRefresh || (refreshEveryMs > 0 && Date.now() - lastRefreshAt >= refreshEveryMs);
+        const result = await captureAdsAfterOrderScrape(scraper, summary, { control, refresh: shouldRefresh });
+        if (forceRefresh && result?.status === "ok") {
+          lastRefreshRequestedAt = control.refreshRequestedAt;
+        }
         if (shouldRefresh && result?.status === "ok") {
           lastRefreshAt = Date.now();
         }
@@ -124,7 +138,7 @@ async function captureAdsAfterOrderScrape(scraper, summary, options = {}) {
   if (scraper.adCapture?.enabled === false) return;
 
   try {
-    const control = await readAdCaptureControl(scraper.adCapture?.controlPath);
+    const control = options.control ?? await readAdCaptureControl(scraper.adCapture?.controlPath);
     if (control.paused) {
       console.log(`广告端抓取已暂停：${control.reason || "正在手动调整广告"}`);
       return;
@@ -207,6 +221,7 @@ async function readAdCaptureControl(controlPath) {
     paused: Boolean(control?.paused),
     reason: String(control?.reason ?? ""),
     targetDate: normalizeDate(control?.targetDate),
+    refreshRequestedAt: String(control?.refreshRequestedAt ?? ""),
     updatedAt: String(control?.updatedAt ?? "")
   };
 }

@@ -163,6 +163,8 @@ export function updateCampaignPageDateUrl(url, storeDate) {
     parsedUrl.searchParams.set("relative_time", "custom");
     parsedUrl.searchParams.set("st", normalizedDate);
     parsedUrl.searchParams.set("et", normalizedDate);
+    parsedUrl.searchParams.set("sort_state", "stat_cost");
+    parsedUrl.searchParams.set("sort_order", "1");
     return parsedUrl.toString();
   } catch {
     return url;
@@ -247,6 +249,12 @@ async function readAdsPowerCampaignRows(debuggerEndpoint, options = {}) {
       if (page) {
         await navigateToCampaignUrl(page, updateCampaignPageDateUrl(options.campaignPageUrl, targetDate));
       }
+    }
+
+    if (!page && options.campaignPageUrl && canOpenMissingPage) {
+      const context = browser.contexts()[0] ?? await browser.newContext();
+      page = await context.newPage();
+      await navigateToCampaignUrl(page, updateCampaignPageDateUrl(options.campaignPageUrl, targetDate));
     }
 
     if (!page) {

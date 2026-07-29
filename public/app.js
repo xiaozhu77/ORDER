@@ -265,7 +265,20 @@ async function toggleAdCapture() {
         reason: paused ? "用户正在手动调整广告" : ""
       })
     });
-    renderAdCaptureControl(await response.json());
+    const control = await response.json();
+    const payload = {
+      paused,
+      reason: control.reason || "",
+      refreshRequestedAt: paused ? "" : new Date().toISOString()
+    };
+    await Promise.all(stores.map((store) => (
+      fetch(`/api/ad-capture-control?store=${encodeURIComponent(store.key)}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload)
+      })
+    )));
+    renderAdCaptureControl({ ...control, ...payload });
   } catch (error) {
     elements.adCaptureToggle.textContent = `切换失败：${error.message}`;
   } finally {
@@ -342,6 +355,7 @@ async function playSoftBrowserTone() {
 async function syncAdCaptureTargetDate(targetDate) {
   const store = activeStore();
   if (!store?.key || !targetDate) return;
+  if (adCapturePaused) return;
   if (syncedAdCaptureTargetDates[store.key] === targetDate) return;
   syncedAdCaptureTargetDates[store.key] = targetDate;
 
@@ -349,7 +363,7 @@ async function syncAdCaptureTargetDate(targetDate) {
     await fetch(`/api/ad-capture-control?store=${encodeURIComponent(store.key)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ targetDate })
+      body: JSON.stringify({ targetDate, refreshRequestedAt: new Date().toISOString() })
     });
   } catch {
     delete syncedAdCaptureTargetDates[store.key];
