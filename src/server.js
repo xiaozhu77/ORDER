@@ -30,6 +30,11 @@ export async function startServer(config) {
         return;
       }
 
+      if (url.pathname === "/vendor/gsap.min.js") {
+        await sendVendorFile(response, path.join(rootDir, "node_modules", "gsap", "dist", "gsap.min.js"));
+        return;
+      }
+
       const pathname = url.pathname === "/" ? "/index.html" : decodeURIComponent(url.pathname);
       const filePath = path.resolve(publicDir, `.${pathname}`);
 
@@ -67,6 +72,15 @@ export async function startServer(config) {
   });
   console.log(`看板已启动: http://${dashboard.host}:${dashboard.port}`);
   return server;
+}
+
+async function sendVendorFile(response, filePath) {
+  const data = await fs.readFile(filePath);
+  response.writeHead(200, {
+    "content-type": contentType(filePath),
+    "cache-control": "public, max-age=3600"
+  });
+  response.end(data);
 }
 
 async function handleAlertSound(request, response, config, url) {

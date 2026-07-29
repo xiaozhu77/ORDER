@@ -8,6 +8,9 @@ let adCapturePaused = false;
 let stores = [];
 let selectedStoreKey = localStorage.getItem("orderDashboard.selectedStore") || "";
 const syncedAdCaptureTargetDates = {};
+let storeDropdownOpen = false;
+let storeDropdownOpenTl = null;
+let storeDropdownCloseTl = null;
 
 const metricOrderStorageKey = "orderDashboard.metricOrder";
 const adDataStorageKey = "orderDashboard.latestAdData";
@@ -23,6 +26,11 @@ const elements = {
   subtitle: document.querySelector("#subtitle"),
   health: document.querySelector("#health"),
   storeSwitcher: document.querySelector("#storeSwitcher"),
+  storeDropdown: document.querySelector("#storeDropdown"),
+  storeDropdownTrigger: document.querySelector("#storeDropdownTrigger"),
+  storeDropdownLabel: document.querySelector("#storeDropdownLabel"),
+  storeDropdownMenu: document.querySelector("#storeDropdownMenu"),
+  storeDropdownArrow: document.querySelector(".storeDropdownArrow"),
   adCaptureToggle: document.querySelector("#adCaptureToggle"),
   testAlertSound: document.querySelector("#testAlertSound"),
   metrics: document.querySelector(".metrics"),
@@ -54,10 +62,22 @@ elements.dateSwitcher.addEventListener("click", handleDateClick);
 elements.adCaptureToggle.addEventListener("click", toggleAdCapture);
 elements.testAlertSound?.addEventListener("click", testAlertSound);
 elements.storeSwitcher?.addEventListener("change", handleStoreChange);
+elements.storeDropdownTrigger?.addEventListener("click", toggleStoreDropdown);
+document.addEventListener("click", closeStoreDropdownFromOutside);
 initMetricSorting();
 
 init();
 setInterval(refresh, 10000);
+
+function gsapReady() {
+  return window.gsap && !window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+}
+
+function er(easeName) {
+  const gsap = window.gsap;
+  const ease = gsap?.parseEase?.(easeName) || ((progress) => progress);
+  return (progress) => 1 - ease(1 - progress);
+}
 
 async function init() {
   await loadStores();
@@ -96,6 +116,135 @@ function renderStoreSwitcher() {
     `<option value="${escapeAttr(store.key)}">${escapeHtml(store.name || store.key)}</option>`
   )).join("");
   elements.storeSwitcher.value = selectedStoreKey;
+  renderStoreDropdown();
+}
+
+function renderStoreDropdown() {
+  if (!elements.storeDropdownMenu || !elements.storeDropdownLabel) return;
+  const active = activeStore();
+  elements.storeDropdownLabel.textContent = active.name || active.key || "店铺";
+  elements.storeDropdownTrigger?.setAttribute("aria-expanded", "false");
+  elements.storeDropdownMenu.innerHTML = stores.map((store) => (
+    `<button class="storeDropdownItem ${store.key === selectedStoreKey ? "active" : ""}" data-store-key="${escapeAttr(store.key)}" type="button">${escapeHtml(store.name || store.key)}</button>`
+  )).join("");
+  elements.storeDropdownMenu.querySelectorAll("[data-store-key]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      selectStore(button.dataset.storeKey);
+    });
+  });
+  initStoreDropdownTimeline();
+}
+
+function initStoreDropdownTimeline() {
+  if (!elements.storeDropdownMenu || !elements.storeDropdownArrow) return;
+  const gsap = window.gsap;
+  storeDropdownOpenTl?.kill();
+  storeDropdownCloseTl?.kill();
+  storeDropdownOpenTl = null;
+  storeDropdownCloseTl = null;
+  storeDropdownOpen = false;
+  elements.storeDropdownMenu.classList.remove("open");
+
+  if (!gsapReady()) return;
+  document.body.classList.add("gsap-enhanced");
+  gsap.set(elements.storeDropdownMenu, { autoAlpha: 0, yPercent: -24, scale: 0.72 });
+  gsap.set(elements.storeDropdownArrow, { rotation: 0, transformOrigin: "50% 50%" });
+  gsap.set(".storeDropdownItem", { opacity: 1, x: 0 });
+
+  storeDropdownOpenTl = gsap.timeline({ paused: true })
+    .to(elements.storeDropdownArrow, {
+      rotation: 180,
+      duration: 0.9,
+      ease: "elastic.out(1.2, 0.3)"
+    }, 0)
+    .to(elements.storeDropdownMenu, {
+      autoAlpha: 1,
+      yPercent: 0,
+      scale: 1,
+      duration: 1,
+      ease: "elastic.out(1.2, 0.3)"
+    }, 0)
+    .from(elements.storeDropdownMenu.querySelectorAll(".storeDropdownItem"), {
+      opacity: 0,
+      x: -20,
+      duration: 0.5,
+      ease: "back.out(3)",
+      stagger: 0.07
+    }, 0.1);
+
+  storeDropdownCloseTl = gsap.timeline({
+    paused: true,
+    onComplete: () => elements.storeDropdownMenu.classList.remove("open")
+  })
+    .to(elements.storeDropdownMenu.querySelectorAll(".storeDropdownItem"), {
+      opacity: 0,
+      x: -12,
+      duration: 0.2,
+      ease: er("power2.out"),
+      stagger: { each: 0.035, from: "end" }
+    }, 0)
+    .to(elements.storeDropdownArrow, {
+      rotation: 0,
+      duration: 0.38,
+      ease: er("power2.inOut")
+    }, 0)
+    .to(elements.storeDropdownMenu, {
+      autoAlpha: 0,
+      yPercent: -24,
+      scale: 0.72,
+      duration: 0.36,
+      ease: er("power3.out")
+    }, 0.04);
+}
+
+function toggleStoreDropdown(event) {
+  event.stopPropagation();
+  if (storeDropdownOpen) {
+    closeStoreDropdown();
+  } else {
+    openStoreDropdown();
+  }
+}
+
+function openStoreDropdown() {
+  if (!elements.storeDropdownMenu) return;
+  storeDropdownOpen = true;
+  elements.storeDropdownMenu.classList.add("open");
+  elements.storeDropdownTrigger?.setAttribute("aria-expanded", "true");
+  if (!storeDropdownOpenTl) return;
+  storeDropdownCloseTl?.pause(0);
+  storeDropdownOpenTl.timeScale(1).restart();
+}
+
+function closeStoreDropdown() {
+  if (!storeDropdownOpen) return;
+  storeDropdownOpen = false;
+  elements.storeDropdownTrigger?.setAttribute("aria-expanded", "false");
+  if (!storeDropdownCloseTl) {
+    elements.storeDropdownMenu?.classList.remove("open");
+    return;
+  }
+  storeDropdownOpenTl?.pause(0);
+  storeDropdownCloseTl.timeScale(1).restart();
+}
+
+function closeStoreDropdownFromOutside(event) {
+  if (!storeDropdownOpen) return;
+  if (elements.storeDropdown?.contains(event.target)) return;
+  closeStoreDropdown();
+}
+
+function selectStore(storeKey) {
+  if (!storeKey || storeKey === selectedStoreKey) {
+    closeStoreDropdown();
+    return;
+  }
+  if (elements.storeSwitcher) {
+    elements.storeSwitcher.value = storeKey;
+  }
+  handleStoreChange({ target: { value: storeKey } });
+  closeStoreDropdown();
 }
 
 function handleStoreChange(event) {
@@ -107,6 +256,7 @@ function handleStoreChange(event) {
   selectedUtmId = "";
   latestData = null;
   latestAdData = readStoredAdData();
+  renderStoreDropdown();
   refresh();
 }
 
