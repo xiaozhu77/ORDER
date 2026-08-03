@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { playNewOrderAlert } from "./alert.js";
 import { loadConfig } from "./config.js";
 import { readJson, writeJson } from "./file-store.js";
 
@@ -27,6 +28,11 @@ export async function startServer(config) {
 
       if (url.pathname === "/api/alert-sound") {
         await handleAlertSound(request, response, config, url);
+        return;
+      }
+
+      if (url.pathname === "/api/test-alert-sound") {
+        await handleTestAlertSound(request, response, config, url);
         return;
       }
 
@@ -103,6 +109,25 @@ async function handleAlertSound(request, response, config, url) {
     "cache-control": "no-store"
   });
   response.end(data);
+}
+
+async function handleTestAlertSound(request, response, config, url) {
+  if (request.method !== "POST") {
+    sendJson(response, 405, { error: "Method not allowed" });
+    return;
+  }
+
+  const store = resolveStore(config, url.searchParams.get("store"));
+  const alertConfig = store.scraper?.alerts || config.scraper?.alerts || {};
+  const soundPath = alertConfig.soundPath || "";
+  if (!soundPath) {
+    sendJson(response, 404, { error: "未配置提示音文件" });
+    return;
+  }
+
+  await fs.access(path.resolve(soundPath));
+  await playNewOrderAlert({ ...alertConfig, enabled: true }, 1);
+  sendJson(response, 200, { played: true });
 }
 
 async function handleAdCaptureControl(request, response, config, url) {

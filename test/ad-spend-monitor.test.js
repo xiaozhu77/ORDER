@@ -6,6 +6,7 @@ import test from "node:test";
 import {
   captureAdsPowerAdData,
   extractAdAccountId,
+  extractCtid,
   isTargetCampaignPage,
   isTikTokAdAccountPage,
   normalizeAmount,
@@ -72,16 +73,34 @@ test("matches non-campaign TikTok Ads pages for the configured account", () => {
   assert.equal(isTikTokAdAccountPage(creativeUrl, "7618477796998119432"), true);
 });
 
-test("updates TikTok campaign page date parameters", () => {
+test("updates TikTok campaign page date and account context parameters", () => {
   const original = "https://ads.tiktok.com/i18n/manage/campaign?aadvid=7618477796998119432&relative_time=today&st=2026-07-24&et=2026-07-24";
-  const updated = new URL(updateCampaignPageDateUrl(original, "2026-07-25"));
+  const updated = new URL(updateCampaignPageDateUrl(original, "2026-07-25", "7654187449052200967"));
 
   assert.equal(updated.searchParams.get("aadvid"), "7618477796998119432");
+  assert.equal(extractCtid(updated.toString()), "7654187449052200967");
   assert.equal(updated.searchParams.get("relative_time"), "custom");
   assert.equal(updated.searchParams.get("st"), "2026-07-25");
   assert.equal(updated.searchParams.get("et"), "2026-07-25");
   assert.equal(updated.searchParams.get("sort_state"), "stat_cost");
   assert.equal(updated.searchParams.get("sort_order"), "1");
+});
+
+test("keeps each TikTok ad account mapped to its configured ctid", () => {
+  const mappings = [
+    ["7618477796998119432", "7654187449052200967"],
+    ["7646310799505506311", "7655753587989250056"]
+  ];
+
+  for (const [adAccountId, ctid] of mappings) {
+    const url = updateCampaignPageDateUrl(
+      `https://ads.tiktok.com/i18n/manage/campaign?aadvid=${adAccountId}`,
+      "2026-07-29",
+      ctid
+    );
+    assert.equal(extractAdAccountId(url), adAccountId);
+    assert.equal(extractCtid(url), ctid);
+  }
 });
 
 test("sums campaign spend", () => {

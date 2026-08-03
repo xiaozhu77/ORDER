@@ -1,4 +1,4 @@
-let sortBy = "count";
+const sortBy = "count";
 let selectedUtmId = "";
 let selectedDate = "";
 let latestData = null;
@@ -51,13 +51,9 @@ const elements = {
   chartInfo: document.querySelector("#chartInfo"),
   orderChart: document.querySelector("#orderChart"),
   summaryRows: document.querySelector("#summaryRows"),
-  scrapeInfo: document.querySelector("#scrapeInfo"),
-  sortCount: document.querySelector("#sortCount"),
-  sortAmount: document.querySelector("#sortAmount")
+  scrapeInfo: document.querySelector("#scrapeInfo")
 };
 
-elements.sortCount.addEventListener("click", () => setSort("count"));
-elements.sortAmount.addEventListener("click", () => setSort("amount"));
 elements.dateSwitcher.addEventListener("click", handleDateClick);
 elements.adCaptureToggle.addEventListener("click", toggleAdCapture);
 elements.testAlertSound?.addEventListener("click", testAlertSound);
@@ -65,6 +61,7 @@ elements.storeSwitcher?.addEventListener("change", handleStoreChange);
 elements.storeDropdownTrigger?.addEventListener("click", toggleStoreDropdown);
 document.addEventListener("click", closeStoreDropdownFromOutside);
 initMetricSorting();
+initMetricTilt();
 
 init();
 setInterval(refresh, 10000);
@@ -79,16 +76,43 @@ function er(easeName) {
   return (progress) => 1 - ease(1 - progress);
 }
 
+function initMetricTilt() {
+  const gsap = window.gsap;
+  if (!gsapReady() || !elements.metrics) return;
+
+  gsap.set(elements.metrics, { perspective: 650 });
+  metricCards().forEach((card) => {
+    const inner = card.querySelector(".metricInner");
+    if (!inner) return;
+
+    const outerRX = gsap.quickTo(card, "rotationX", { duration: 0.32, ease: "power3" });
+    const outerRY = gsap.quickTo(card, "rotationY", { duration: 0.32, ease: "power3" });
+    const innerX = gsap.quickTo(inner, "x", { duration: 0.32, ease: "power3" });
+    const innerY = gsap.quickTo(inner, "y", { duration: 0.32, ease: "power3" });
+
+    card.addEventListener("pointermove", (event) => {
+      if (draggedMetricId) return;
+      const rect = card.getBoundingClientRect();
+      const xProgress = (event.clientX - rect.left) / rect.width;
+      const yProgress = (event.clientY - rect.top) / rect.height;
+      outerRX(gsap.utils.interpolate(7, -7, yProgress));
+      outerRY(gsap.utils.interpolate(-7, 7, xProgress));
+      innerX(gsap.utils.interpolate(-10, 10, xProgress));
+      innerY(gsap.utils.interpolate(-8, 8, yProgress));
+    });
+
+    card.addEventListener("pointerleave", () => {
+      outerRX(0);
+      outerRY(0);
+      innerX(0);
+      innerY(0);
+    });
+  });
+}
+
 async function init() {
   await loadStores();
   latestAdData = readStoredAdData();
-  refresh();
-}
-
-function setSort(nextSortBy) {
-  sortBy = nextSortBy;
-  elements.sortCount.classList.toggle("active", sortBy === "count");
-  elements.sortAmount.classList.toggle("active", sortBy === "amount");
   refresh();
 }
 
@@ -441,7 +465,13 @@ async function testAlertSound() {
   elements.testAlertSound.disabled = true;
   elements.testAlertSound.textContent = "播放中...";
   try {
-    await playConfiguredAlertSound();
+    const response = await fetch(`/api/test-alert-sound?store=${encodeURIComponent(activeStore().key)}`, {
+      method: "POST"
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.error || "QQ 提示音播放失败");
+    }
     elements.testAlertSound.textContent = "已播放";
     window.setTimeout(() => {
       elements.testAlertSound.textContent = "测试提示音";
@@ -454,52 +484,6 @@ async function testAlertSound() {
       elements.testAlertSound.disabled = false;
     }, 1600);
   }
-}
-
-async function playConfiguredAlertSound() {
-  const sound = new Audio(`/api/alert-sound?store=${encodeURIComponent(activeStore().key)}&t=${Date.now()}`);
-  sound.volume = 0.85;
-  try {
-    await sound.play();
-    await new Promise((resolve) => {
-      sound.addEventListener("ended", resolve, { once: true });
-      window.setTimeout(resolve, 1500);
-    });
-  } catch {
-    await playSoftBrowserTone();
-  }
-}
-
-async function playSoftBrowserTone() {
-  const AudioContext = window.AudioContext || window.webkitAudioContext;
-  if (!AudioContext) throw new Error("浏览器不支持音频");
-
-  const audio = new AudioContext();
-  const master = audio.createGain();
-  master.gain.value = 0.18;
-  master.connect(audio.destination);
-
-  const notes = [
-    { frequency: 620, start: 0, duration: 0.17 },
-    { frequency: 710, start: 0.31, duration: 0.17 }
-  ];
-
-  for (const note of notes) {
-    const oscillator = audio.createOscillator();
-    const gain = audio.createGain();
-    oscillator.type = "sine";
-    oscillator.frequency.value = note.frequency;
-    gain.gain.setValueAtTime(0, audio.currentTime + note.start);
-    gain.gain.linearRampToValueAtTime(0.9, audio.currentTime + note.start + 0.025);
-    gain.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + note.start + note.duration);
-    oscillator.connect(gain);
-    gain.connect(master);
-    oscillator.start(audio.currentTime + note.start);
-    oscillator.stop(audio.currentTime + note.start + note.duration + 0.02);
-  }
-
-  await new Promise((resolve) => window.setTimeout(resolve, 620));
-  await audio.close();
 }
 
 async function syncAdCaptureTargetDate(targetDate) {
@@ -707,8 +691,15 @@ function renderAdSpend(adRow) {
 }
 
 function renderAdStatus(adRow) {
-  if (!adRow) return "-";
-  return `<span class="adStatusPill">${escapeHtml(adRow.status || "-")}</span>`;
+  const status = adRow?.status || "无数据";
+  const statusLevel = classifyAdStatus(status);
+  return `<span class="adStatusPill ${escapeAttr(statusLevel)}" title="${escapeAttr(status)}" aria-label="${escapeAttr(status)}"><span class="adStatusDot"></span></span>`;
+}
+
+function classifyAdStatus(status) {
+  const value = String(status || "").toLowerCase();
+  if (/(投放中|进行中|active|running|enabled|\bon\b)/i.test(value)) return "statusActive";
+  return "statusIdle";
 }
 
 function renderAdCpcCtr(adRow) {

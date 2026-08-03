@@ -20,6 +20,7 @@ export async function runAdSpendMonitor(options = {}) {
     outputPath: options.outputPath,
     refresh: options.refresh !== false,
     adAccountId: options.adAccountId ?? config.scraper.adCapture.adAccountId,
+    ctid: options.ctid ?? config.scraper.adCapture.ctid,
     campaignPageUrl: options.campaignPageUrl ?? config.scraper.adCapture.campaignPageUrl,
     storeDate: options.storeDate ?? storeSummary.storeDate,
     orderSummaryGeneratedAt: storeSummary.generatedAt
@@ -48,19 +49,21 @@ async function captureAdsPowerAdDataOnce(options = {}) {
     const browserResult = await readAdsPowerCampaignRows(debuggerEndpoint, {
       refresh: options.refresh !== false,
       adAccountId: options.adAccountId,
+      ctid: options.ctid,
       campaignPageUrl: options.campaignPageUrl,
+      openMissingPage: options.openMissingPage,
       storeDate: options.storeDate,
       connectTimeoutMs: options.connectTimeoutMs,
       readTimeoutMs: options.readTimeoutMs
     });
 
-    if (!browserResult.ok) {
+    if (!browserResult.ok || !browserResult.rows?.length) {
       result = buildResult({
         status: "skip",
         storeDate: options.storeDate,
         orderSummaryGeneratedAt: options.orderSummaryGeneratedAt,
         debuggerEndpoint,
-        reason: browserResult.reason
+        reason: browserResult.reason || "广告页面暂未加载到推广系列，保留上一次有效数据"
       });
     } else {
       result = buildResult({
@@ -154,15 +157,26 @@ export function extractAdDate(url) {
   }
 }
 
-export function updateCampaignPageDateUrl(url, storeDate) {
+export function extractCtid(url) {
+  try {
+    return new URL(url).searchParams.get("ctid") ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function updateCampaignPageDateUrl(url, storeDate, ctid = "") {
   const normalizedDate = normalizeText(storeDate);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate)) return url;
+  const normalizedCtid = normalizeText(ctid);
 
   try {
     const parsedUrl = new URL(url);
-    parsedUrl.searchParams.set("relative_time", "custom");
-    parsedUrl.searchParams.set("st", normalizedDate);
-    parsedUrl.searchParams.set("et", normalizedDate);
+    if (normalizedCtid) parsedUrl.searchParams.set("ctid", normalizedCtid);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate)) {
+      parsedUrl.searchParams.set("relative_time", "custom");
+      parsedUrl.searchParams.set("st", normalizedDate);
+      parsedUrl.searchParams.set("et", normalizedDate);
+    }
     parsedUrl.searchParams.set("sort_state", "stat_cost");
     parsedUrl.searchParams.set("sort_order", "1");
     return parsedUrl.toString();
@@ -224,10 +238,11 @@ async function getLatestDebuggerEndpoint(logDirPath) {
 async function readAdsPowerCampaignRows(debuggerEndpoint, options = {}) {
   const targetDate = normalizeText(options.storeDate);
   const canOpenMissingPage = options.openMissingPage !== false;
-  if (options.refresh === false && options.campaignPageUrl && canOpenMissingPage) {
+  if (options.campaignPageUrl && canOpenMissingPage) {
     const directResult = await readAdsPowerCampaignRowsViaPageCdp(debuggerEndpoint, {
       ...options,
-      navigateUrl: updateCampaignPageDateUrl(options.campaignPageUrl, targetDate)
+      navigateUrl: updateCampaignPageDateUrl(options.campaignPageUrl, targetDate, options.ctid),
+      forceRefresh: options.refresh !== false
     }).catch(() => null);
     if (directResult?.ok) return directResult;
   }
@@ -247,14 +262,14 @@ async function readAdsPowerCampaignRows(debuggerEndpoint, options = {}) {
     if (!page && options.campaignPageUrl && canOpenMissingPage) {
       page = pages.find((candidate) => isTikTokAdAccountPage(candidate.url(), options.adAccountId));
       if (page) {
-        await navigateToCampaignUrl(page, updateCampaignPageDateUrl(options.campaignPageUrl, targetDate));
+        await navigateToCampaignUrl(page, updateCampaignPageDateUrl(options.campaignPageUrl, targetDate, options.ctid));
       }
     }
 
     if (!page && options.campaignPageUrl && canOpenMissingPage) {
       const context = browser.contexts()[0] ?? await browser.newContext();
       page = await context.newPage();
-      await navigateToCampaignUrl(page, updateCampaignPageDateUrl(options.campaignPageUrl, targetDate));
+      await navigateToCampaignUrl(page, updateCampaignPageDateUrl(options.campaignPageUrl, targetDate, options.ctid));
     }
 
     if (!page) {
@@ -264,8 +279,10 @@ async function readAdsPowerCampaignRows(debuggerEndpoint, options = {}) {
       };
     }
 
-    if (targetDate && extractAdDate(page.url()) !== targetDate) {
-      await gotoCampaignDate(page, targetDate);
+    const hasWrongDate = targetDate && extractAdDate(page.url()) !== targetDate;
+    const hasWrongCtid = options.ctid && extractCtid(page.url()) !== normalizeText(options.ctid);
+    if (hasWrongDate || hasWrongCtid) {
+      await gotoCampaignDate(page, targetDate, options.ctid);
     }
 
     if (options.refresh !== false) {
@@ -333,16 +350,29 @@ async function readAdsPowerCampaignRowsViaPageCdp(debuggerEndpoint, options = {}
     };
   }
 
-  if (options.navigateUrl && (!isTargetCampaignPage(pageInfo.url, options.adAccountId) || extractAdDate(pageInfo.url) !== extractAdDate(options.navigateUrl))) {
+  const needsNavigation = options.navigateUrl && (
+    !isTargetCampaignPage(pageInfo.url, options.adAccountId)
+    || extractAdDate(pageInfo.url) !== extractAdDate(options.navigateUrl)
+    || extractCtid(pageInfo.url) !== extractCtid(options.navigateUrl)
+  );
+  if (needsNavigation) {
     await navigatePageCdp(pageInfo.webSocketDebuggerUrl, options.navigateUrl, options.readTimeoutMs ?? 30000).catch(async () => {
+      await closeDevtoolsPage(debuggerEndpoint, pageInfo?.id, options.connectTimeoutMs ?? 5000).catch(() => {});
       pageInfo = await openDevtoolsPage(debuggerEndpoint, options.navigateUrl, options.connectTimeoutMs ?? 5000);
       if (pageInfo?.webSocketDebuggerUrl) {
         await waitForCampaignRowsCdp(pageInfo.webSocketDebuggerUrl, options.navigateUrl, options.readTimeoutMs ?? 30000);
       }
     });
+  } else if (options.forceRefresh) {
+    const clicked = await clickCampaignRefreshCdp(pageInfo.webSocketDebuggerUrl, options.readTimeoutMs ?? 5000).catch(() => false);
+    if (clicked) {
+      await new Promise((resolve) => setTimeout(resolve, 4000));
+    } else {
+      await navigatePageCdp(pageInfo.webSocketDebuggerUrl, options.navigateUrl, options.readTimeoutMs ?? 30000);
+    }
   }
 
-  const data = await evaluatePageCdp(pageInfo.webSocketDebuggerUrl, `(() => {
+  const readPageData = (webSocketUrl) => evaluatePageCdp(webSocketUrl, `(() => {
     const grouped = {};
     for (const element of Array.from(document.querySelectorAll("[slot^='cell-']"))) {
       const slot = element.getAttribute("slot") || "";
@@ -364,6 +394,17 @@ async function readAdsPowerCampaignRowsViaPageCdp(debuggerEndpoint, options = {}
       pageTotalSpend: moneyElements[0] || ""
     };
   })()`, options.readTimeoutMs ?? 5000);
+  let data;
+  try {
+    data = await readPageData(pageInfo.webSocketDebuggerUrl);
+  } catch (error) {
+    if (!options.navigateUrl) throw error;
+    await closeDevtoolsPage(debuggerEndpoint, pageInfo?.id, options.connectTimeoutMs ?? 5000).catch(() => {});
+    pageInfo = await openDevtoolsPage(debuggerEndpoint, options.navigateUrl, options.connectTimeoutMs ?? 5000);
+    if (!pageInfo?.webSocketDebuggerUrl) throw error;
+    await waitForCampaignRowsCdp(pageInfo.webSocketDebuggerUrl, options.navigateUrl, options.readTimeoutMs ?? 30000);
+    data = await readPageData(pageInfo.webSocketDebuggerUrl);
+  }
 
   return {
     ok: true,
@@ -384,25 +425,43 @@ function isRecoverableTikTokAdsPage(page, adAccountId = "") {
 }
 
 async function navigatePageCdp(webSocketUrl, url, timeoutMs) {
+  const navigationToken = `codex-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  await evaluatePageCdp(webSocketUrl, `(() => {
+    window.__codexAdNavigationToken = ${JSON.stringify(navigationToken)};
+    return true;
+  })()`, 5000).catch(() => {});
   await sendPageCdpCommand(webSocketUrl, "Page.enable", {}, timeoutMs);
   await sendPageCdpCommand(webSocketUrl, "Page.navigate", { url }, timeoutMs);
-  await waitForCampaignRowsCdp(webSocketUrl, url, timeoutMs);
+  await waitForCampaignRowsCdp(webSocketUrl, url, timeoutMs, navigationToken);
 }
 
-async function waitForCampaignRowsCdp(webSocketUrl, url, timeoutMs) {
+async function clickCampaignRefreshCdp(webSocketUrl, timeoutMs) {
+  return evaluatePageCdp(webSocketUrl, `(() => {
+    const containers = Array.from(document.querySelectorAll(".cl-flex-none.cl-inline-flex.cl-items-center.cl-w-fit"));
+    const container = containers.find((element) => (element.textContent || "").includes("刷新数据"));
+    const button = container?.querySelector("ks-icon-button-1-1-1n, ks-icon-button, .KsIconButton, button");
+    if (!button) return false;
+    button.click();
+    return true;
+  })()`, timeoutMs);
+}
+
+async function waitForCampaignRowsCdp(webSocketUrl, url, timeoutMs, navigationToken = "") {
   const deadline = Date.now() + Math.max(15000, Number(timeoutMs));
   while (Date.now() < deadline) {
     const state = await evaluatePageCdp(webSocketUrl, `(() => ({
       url: location.href,
-      hasRows: Boolean(document.querySelector("[slot^='cell-']"))
+      hasRows: Boolean(document.querySelector("[slot^='cell-']")),
+      navigationToken: window.__codexAdNavigationToken || ""
     }))()`, 5000).catch(() => null);
-    if (state?.hasRows && isTargetCampaignPage(state.url) && extractAdDate(state.url) === extractAdDate(url)) return;
+    const reachedNewDocument = !navigationToken || state?.navigationToken !== navigationToken;
+    if (reachedNewDocument && state?.hasRows && isTargetCampaignPage(state.url) && extractAdDate(state.url) === extractAdDate(url)) return;
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
 }
 
-async function gotoCampaignDate(page, storeDate) {
-  const nextUrl = updateCampaignPageDateUrl(page.url(), storeDate);
+async function gotoCampaignDate(page, storeDate, ctid = "") {
+  const nextUrl = updateCampaignPageDateUrl(page.url(), storeDate, ctid);
   if (nextUrl === page.url()) return;
   await navigateToCampaignUrl(page, nextUrl);
 }
@@ -445,6 +504,21 @@ async function openDevtoolsPage(debuggerEndpoint, url, timeoutMs) {
       signal: controller.signal
     });
     return response.ok ? await response.json() : null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function closeDevtoolsPage(debuggerEndpoint, pageId, timeoutMs) {
+  if (!pageId) return false;
+  const baseUrl = devtoolsHttpBaseUrl(debuggerEndpoint);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${baseUrl}/json/close/${encodeURIComponent(pageId)}`, {
+      signal: controller.signal
+    });
+    return response.ok;
   } finally {
     clearTimeout(timeout);
   }
@@ -629,8 +703,9 @@ function parseCliArgs(argv) {
     if (token === "--log-dir") args.logDirPath = argv[index + 1];
     if (token === "--output") args.outputPath = argv[index + 1];
     if (token === "--ad-account-id") args.adAccountId = argv[index + 1];
+    if (token === "--ctid") args.ctid = argv[index + 1];
     if (token === "--no-refresh") args.refresh = false;
-    if (["--summary", "--config", "--log-dir", "--output", "--ad-account-id"].includes(token)) {
+    if (["--summary", "--config", "--log-dir", "--output", "--ad-account-id", "--ctid"].includes(token)) {
       index += 1;
     }
   }

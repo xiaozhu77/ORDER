@@ -160,6 +160,7 @@ async function captureAdsAfterOrderScrape(scraper, summary, options = {}) {
     const result = await captureAdsPowerAdData({
       refresh: options.refresh ?? scraper.adCapture?.refreshBeforeRead !== false,
       adAccountId: scraper.adCapture?.adAccountId,
+      ctid: scraper.adCapture?.ctid,
       campaignPageUrl: scraper.adCapture?.campaignPageUrl,
       openMissingPage: Boolean(control.targetDate),
       storeDate,
@@ -183,7 +184,7 @@ async function captureAdsAfterOrderScrape(scraper, summary, options = {}) {
       return result;
     }
 
-    console.warn("广告端读取跳过，继续使用上一次成功广告数据。");
+    console.warn(`广告端读取跳过，继续使用上一次成功广告数据：${result.message || "未知原因"}`);
     return result;
   } catch (error) {
     console.warn("广告端读取失败，继续使用上一次成功广告数据。");

@@ -37,6 +37,7 @@
       "intervalMinutes": 0,
       "controlPath": "data/ad-capture-control.json",
       "adAccountId": "",
+      "ctid": "",
       "adAccountName": "",
       "campaignPageUrl": ""
     },
@@ -72,6 +73,7 @@
           "outputPath": "public/data/stores/store-a/ad-summary.json",
           "controlPath": "data/stores/store-a/ad-capture-control.json",
           "adAccountId": "",
+          "ctid": "",
           "adAccountName": "",
           "campaignPageUrl": ""
         },

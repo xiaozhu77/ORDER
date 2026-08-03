@@ -356,8 +356,7 @@ h2 {
 .storeSwitcher,
 .dateSwitcher button,
 .adCaptureToggle,
-.testAlertSound,
-.sortControls button {
+.testAlertSound {
   border-radius: 9px;
   transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
 }
@@ -605,6 +604,7 @@ h2 {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
+  perspective: 650px;
 }
 
 .metrics article {
@@ -612,6 +612,13 @@ h2 {
   padding: 18px;
   cursor: grab;
   transition: border-color 150ms ease, background 150ms ease, opacity 150ms ease, transform 150ms ease;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+.metricInner {
+  transform-style: preserve-3d;
+  will-change: transform;
 }
 
 .metrics article:active {
@@ -679,31 +686,6 @@ h2 {
 
 .tableTitle {
   align-items: flex-start;
-}
-
-.sortControls {
-  display: inline-flex;
-  flex: 0 0 auto;
-  gap: 4px;
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: #11151d;
-}
-
-.sortControls button {
-  border: 0;
-  padding: 7px 12px;
-  color: var(--muted-strong);
-  background: transparent;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.sortControls button.active {
-  color: #ffffff;
-  background: var(--accent);
 }
 
 .continuingGrid {
@@ -845,9 +827,14 @@ table {
 th,
 td {
   padding: 13px 16px;
-  text-align: left;
+  text-align: center;
   border-bottom: 1px solid rgba(139, 152, 170, 0.1);
-  vertical-align: top;
+  vertical-align: middle;
+}
+
+.tableSection th:first-child,
+.tableSection td:first-child {
+  text-align: left;
 }
 
 th {
@@ -870,30 +857,31 @@ tbody tr {
 }
 
 tbody tr:hover {
-  background: rgba(143, 92, 247, 0.055);
+  background: rgba(139, 152, 170, 0.045);
 }
 
 tbody tr.lowRoiRow {
-  background: linear-gradient(90deg, rgba(255, 74, 96, 0.16), rgba(255, 74, 96, 0.035) 48%, transparent);
-  box-shadow: inset 3px 0 0 rgba(255, 74, 96, 0.9);
+  background: rgba(255, 64, 86, 0.045);
+  box-shadow: inset 3px 0 0 rgba(255, 64, 86, 0.75);
 }
 
 tbody tr.lowRoiRow:hover {
-  background: linear-gradient(90deg, rgba(255, 74, 96, 0.22), rgba(255, 74, 96, 0.055) 52%, rgba(143, 92, 247, 0.04));
+  background: rgba(255, 64, 86, 0.07);
 }
 
 tbody tr.warningRoiRow {
-  background: linear-gradient(90deg, rgba(255, 183, 77, 0.15), rgba(255, 183, 77, 0.035) 48%, transparent);
-  box-shadow: inset 3px 0 0 rgba(255, 183, 77, 0.9);
+  background: rgba(255, 176, 0, 0.045);
+  box-shadow: inset 3px 0 0 rgba(255, 176, 0, 0.7);
 }
 
 tbody tr.warningRoiRow:hover {
-  background: linear-gradient(90deg, rgba(255, 183, 77, 0.2), rgba(255, 183, 77, 0.055) 52%, rgba(143, 92, 247, 0.04));
+  background: rgba(255, 176, 0, 0.07);
 }
 
 .utmCell {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 10px;
 }
 
@@ -938,9 +926,10 @@ tbody tr.warningRoiRow:hover {
   align-items: center;
   min-height: 22px;
   padding: 2px 7px;
+  border: 1px solid rgba(139, 152, 170, 0.12);
   border-radius: 999px;
-  color: #93ffc4;
-  background: var(--success-soft);
+  color: var(--muted-strong);
+  background: rgba(139, 152, 170, 0.08);
   font-size: 12px;
   font-weight: 750;
   white-space: nowrap;
@@ -966,27 +955,62 @@ tbody tr.warningRoiRow:hover {
 }
 
 .adSpendStack strong {
-  color: var(--success);
+  color: #eef2ff;
 }
 
 .adStatusPill {
-  display: inline-block;
-  padding: 4px 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+}
+
+.adStatusDot {
+  width: 7px;
+  height: 7px;
   border-radius: 999px;
-  color: #d9ccff;
-  background: var(--accent-soft);
-  font-size: 12px;
-  font-weight: 750;
+  background: #6f7b91;
+  box-shadow: 0 0 0 3px rgba(139, 152, 170, 0.08);
+  flex: 0 0 auto;
+}
+
+.adStatusPill.statusActive {
+  background: rgba(0, 212, 106, 0.07);
+}
+
+.adStatusPill.statusActive .adStatusDot {
+  background: var(--success);
+  animation: adStatusPulse 1.8s ease-in-out infinite;
+}
+
+.adStatusPill.statusIdle {
+  background: rgba(139, 152, 170, 0.055);
 }
 
 .statusPill {
   display: inline-block;
   margin: 0 6px 6px 0;
   padding: 4px 8px;
+  border: 1px solid rgba(139, 152, 170, 0.1);
   border-radius: 999px;
-  background: rgba(143, 92, 247, 0.12);
+  background: rgba(139, 152, 170, 0.07);
   color: var(--muted-strong);
   font-size: 12px;
+}
+
+@keyframes adStatusPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px rgba(0, 212, 106, 0.1);
+    transform: scale(1);
+  }
+
+  50% {
+    box-shadow: 0 0 0 5px rgba(0, 212, 106, 0.18);
+    transform: scale(1.12);
+  }
 }
 
 @media (max-width: 1120px) {
@@ -1050,14 +1074,6 @@ tbody tr.warningRoiRow:hover {
   .tableTitle {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .sortControls {
-    width: 100%;
-  }
-
-  .sortControls button {
-    flex: 1;
   }
 
   .orderLineChart {

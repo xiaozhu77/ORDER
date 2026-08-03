@@ -97,6 +97,7 @@ function applyScraperDefaults(scraper, paths) {
   scraper.adCapture.intervalMinutes ??= 0;
   scraper.adCapture.controlPath ??= paths.adControlPath;
   scraper.adCapture.adAccountId ??= "";
+  scraper.adCapture.ctid ??= "";
   scraper.adCapture.adAccountName ??= "";
   scraper.adCapture.campaignPageUrl ??= "";
 

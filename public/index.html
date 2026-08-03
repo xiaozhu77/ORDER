@@ -75,24 +75,32 @@
       <section class="mainContent">
         <section class="metrics" aria-label="核心经营指标">
           <article data-metric-id="totalOrders" draggable="true">
-            <span>订单数</span>
-            <strong id="totalOrders">0</strong>
-            <small>所选日期</small>
+            <div class="metricInner">
+              <span>订单数</span>
+              <strong id="totalOrders">0</strong>
+              <small>所选日期</small>
+            </div>
           </article>
           <article data-metric-id="totalAmount" draggable="true">
-            <span>订单金额</span>
-            <strong id="totalAmount">£0.00</strong>
-            <small id="totalUsd">$0.00</small>
+            <div class="metricInner">
+              <span>订单金额</span>
+              <strong id="totalAmount">£0.00</strong>
+              <small id="totalUsd">$0.00</small>
+            </div>
           </article>
           <article data-metric-id="adTotalSpend" draggable="true">
-            <span>广告消耗</span>
-            <strong id="adTotalSpend">$0.00</strong>
-            <small id="adSpendInfo">等待广告数据</small>
+            <div class="metricInner">
+              <span>广告消耗</span>
+              <strong id="adTotalSpend">$0.00</strong>
+              <small id="adSpendInfo">等待广告数据</small>
+            </div>
           </article>
           <article data-metric-id="profitCny" draggable="true">
-            <span>利润估算</span>
-            <strong id="profitCny">¥0.00</strong>
-            <small id="profitInfo">按订单美元金额和广告花费估算</small>
+            <div class="metricInner">
+              <span>利润估算</span>
+              <strong id="profitCny">¥0.00</strong>
+              <small id="profitInfo">按订单美元金额和广告花费估算</small>
+            </div>
           </article>
         </section>
 
@@ -127,10 +135,6 @@
             <div>
               <h2>UTM ID 火力分布</h2>
               <p id="scrapeInfo">每 10 秒刷新前端数据</p>
-            </div>
-            <div class="sortControls">
-              <button id="sortCount" class="active" type="button">订单数</button>
-              <button id="sortAmount" type="button">金额</button>
             </div>
           </div>
           <div class="tableWrap">
