@@ -4,4 +4,5 @@ config.json
 data/
 public/data/
 npm-debug.log*
+.env.cloud
 店铺后台抓单/

@@ -2,7 +2,9 @@ import fs from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildStoreDashboardSummary } from "./aggregate.js";
 import { playNewOrderAlert } from "./alert.js";
+import { setAdsPowerCampaignEnabled } from "./ad-spend-monitor.js";
 import { loadConfig } from "./config.js";
 import { readJson, writeJson } from "./file-store.js";
 
@@ -23,6 +25,11 @@ export async function startServer(config) {
 
       if (url.pathname === "/api/ad-capture-control") {
         await handleAdCaptureControl(request, response, config, url);
+        return;
+      }
+
+      if (url.pathname === "/api/ad-campaign-status") {
+        await handleAdCampaignStatus(request, response, config, url);
         return;
       }
 
@@ -159,6 +166,42 @@ async function handleAdCaptureControl(request, response, config, url) {
   sendJson(response, 200, nextState);
 }
 
+async function handleAdCampaignStatus(request, response, config, url) {
+  if (request.method !== "POST") {
+    sendJson(response, 405, { error: "Method not allowed" });
+    return;
+  }
+
+  const store = resolveStore(config, url.searchParams.get("store"));
+  const adCapture = store.scraper?.adCapture ?? {};
+  const body = await readRequestBody(request);
+  const payload = body ? JSON.parse(body) : {};
+  const campaignId = String(payload.campaignId ?? "").trim();
+  if (!/^\d+$/.test(campaignId)) {
+    sendJson(response, 400, { error: "推广系列 ID 无效" });
+    return;
+  }
+
+  const result = await setAdsPowerCampaignEnabled({
+    adAccountId: adCapture.adAccountId,
+    campaignId,
+    enabled: Boolean(payload.enabled)
+  });
+  if (!result.ok) {
+    sendJson(response, 409, { error: result.reason || "广告状态切换失败" });
+    return;
+  }
+
+  const controlPath = adCapture.controlPath ?? "data/ad-capture-control.json";
+  const previousState = await readAdCaptureControl(controlPath);
+  await writeJson(controlPath, {
+    ...previousState,
+    refreshRequestedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+  sendJson(response, 200, result);
+}
+
 async function readAdCaptureControl(controlPath) {
   const control = await readJson(controlPath, {});
   return {
@@ -235,40 +278,12 @@ async function ensureSummaryFile(config, scraper) {
     await fs.access(resolved);
   } catch {
     await fs.mkdir(path.dirname(resolved), { recursive: true });
-    await fs.writeFile(resolved, JSON.stringify({
-      generatedAt: new Date().toISOString(),
-      date: "",
+    const summary = buildStoreDashboardSummary([], {
       storeTimezone: scraper.storeTimezone ?? "America/Anchorage",
-      storeDate: "",
-      selectedDate: "",
-      availableDates: [],
-      yesterdayDate: "",
-      dailySummaries: {},
-      totals: {
-        orderCount: 0,
-        totalAmount: 0,
-        recognizedOrders: 0,
-        unrecognizedOrders: 0,
-        recognitionRate: 0
-      },
-      groups: [],
-      todayGroups: [],
-      yesterdayGroups: [],
-      continuingUtmIds: [],
-      continuingGroups: [],
-      last60Minutes: {
-        orderCount: 0,
-        totalAmount: 0,
-        utmIds: [],
-        groups: [],
-        byUtmId: {},
-        startAt: "",
-        endAt: "",
-        timeZone: scraper.storeTimezone ?? "America/Anchorage",
-        label: "店铺时间"
-      },
-      hourlyBuckets: [],
-      orders: [],
+      days: 7
+    });
+    await fs.writeFile(resolved, JSON.stringify({
+      ...summary,
       currency: config.dashboard.currency ?? {},
       scrapeMeta: {},
       health: {

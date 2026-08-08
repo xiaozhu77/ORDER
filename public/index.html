@@ -130,6 +130,31 @@
           </section>
         </section>
 
+        <section class="autoRuleSection">
+          <div class="sectionTitle tableTitle">
+            <div>
+              <h2>自动规则</h2>
+              <p id="autoRuleStatus">超过阈值时自动关闭推广系列，仅今天执行</p>
+            </div>
+          </div>
+          <div class="autoRuleBody">
+            <label class="autoRuleToggle">
+              <input id="autoRuleEnabled" type="checkbox">
+              <span>启用自动关停</span>
+            </label>
+            <label class="autoRuleThreshold">
+              <span>未出单消耗 ≥</span>
+              <input id="autoRuleThreshold" type="number" min="0" step="0.01" value="5">
+              <strong>USD 自动关闭</strong>
+            </label>
+            <label class="autoRuleThreshold">
+              <span>已出单单次成本 ≥</span>
+              <input id="autoRuleCostThreshold" type="number" min="0" step="0.01" value="15">
+              <strong>USD / 单 自动关闭</strong>
+            </label>
+          </div>
+        </section>
+
         <section class="tableSection">
           <div class="sectionTitle tableTitle">
             <div>
@@ -141,18 +166,45 @@
             <table>
               <thead>
                 <tr>
-                  <th>UTM ID</th>
+                  <th class="campaignIdHeader">推广系列 ID</th>
                   <th>订单数量</th>
                   <th>订单金额</th>
                   <th>广告消耗</th>
                   <th>广告状态</th>
                   <th>CPC / CTR</th>
                   <th>最新订单时间（本地）</th>
-                  <th>状态分布</th>
+                  <th>单次转化成本</th>
                 </tr>
               </thead>
               <tbody id="summaryRows">
                 <tr><td colspan="8">暂无数据</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="tableSection unconvertedSection">
+          <div class="sectionTitle tableTitle">
+            <div>
+              <h2>当天投放未出单</h2>
+              <p id="unconvertedInfo">等待广告数据</p>
+            </div>
+          </div>
+          <div class="tableWrap">
+            <table>
+              <thead>
+                <tr>
+                  <th class="campaignIdHeader">推广系列 ID</th>
+                  <th>推广系列名称</th>
+                  <th>广告消耗</th>
+                  <th>广告状态</th>
+                  <th>CPC / CTR</th>
+                  <th>添加支付信息（网站）</th>
+                  <th>预算</th>
+                </tr>
+              </thead>
+              <tbody id="unconvertedRows">
+                <tr><td colspan="7">暂无数据</td></tr>
               </tbody>
             </table>
           </div>

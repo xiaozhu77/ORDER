@@ -1,4 +1,5 @@
 import { runAdCaptureLoop, runScraper } from "./scraper.js";
+import { startCloudSync } from "./cloud-sync.js";
 import { startServer } from "./server.js";
 
 export async function startRuntime(config) {
@@ -13,13 +14,24 @@ export async function startRuntime(config) {
       scraper: store.scraper
     };
 
-    runScraper(storeConfig).catch((error) => {
-      console.error(`[${store.key}] order scraper stopped:`, error.message);
-    });
-    runAdCaptureLoop(storeConfig).catch((error) => {
-      console.error(`[${store.key}] ad capture stopped:`, error.message);
-    });
+    runContinuously(() => runScraper(storeConfig), store.key, "order scraper");
+    runContinuously(() => runAdCaptureLoop(storeConfig), store.key, "ad capture");
   }
 
+  startCloudSync(config)?.catch((error) => {
+    console.error(`云端看板同步已停止：${error.message}`);
+  });
+
   return { server };
+}
+
+async function runContinuously(run, storeKey, label) {
+  while (true) {
+    try {
+      await run();
+    } catch (error) {
+      console.error(`[${storeKey}] ${label} stopped: ${error.message}. Restarting in 5 seconds.`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+  }
 }

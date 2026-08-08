@@ -1,11 +1,13 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright";
+import { buildStoreDashboardSummary } from "./aggregate.js";
 import { playNewOrderAlert } from "./alert.js";
 import { captureAdsPowerAdData } from "./ad-spend-monitor.js";
 import { readJson, writeJson } from "./file-store.js";
 import { loadStoredOrders, saveIncrementalOrders, saveScrapedOrders } from "./orders-store.js";
 import { scrapeStoreIncremental, scrapeStoreRecentDays } from "./store-today.js";
+import { formatDateInZone } from "./utm.js";
 
 export async function runScraper(config) {
   const scraper = config.scraper;
@@ -92,8 +94,9 @@ export async function runAdCaptureLoop(config) {
   while (true) {
     const startedAt = new Date();
     try {
-      const summary = await readJson(scraper.dashboardDataPath, null);
-      if (summary) {
+      const savedSummary = await readJson(scraper.dashboardDataPath, null);
+      if (savedSummary) {
+        const summary = await ensureCurrentDashboardSummary(scraper, savedSummary);
         const control = await readAdCaptureControl(scraper.adCapture?.controlPath);
         if (control.paused) {
           if (control.refreshRequestedAt) {
@@ -127,6 +130,33 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function ensureCurrentDashboardSummary(scraper, summary) {
+  const storeTimezone = scraper.storeTimezone ?? "America/Anchorage";
+  const currentStoreDate = formatDateInZone(new Date(), storeTimezone);
+  if (summary.storeDate === currentStoreDate && summary.dailySummaries?.[currentStoreDate]) {
+    return summary;
+  }
+
+  const storedOrders = await readJson(scraper.ordersOutputPath, summary.orders ?? []);
+  const rolledSummary = buildStoreDashboardSummary(storedOrders, {
+    storeDate: currentStoreDate,
+    storeTimezone,
+    days: 7
+  });
+  const nextSummary = {
+    ...rolledSummary,
+    currency: summary.currency ?? {},
+    scrapeMeta: summary.scrapeMeta ?? {},
+    health: summary.health ?? {
+      ok: false,
+      message: "等待首次抓取",
+      lastScrapeAt: ""
+    }
+  };
+  await writeJson(scraper.dashboardDataPath, nextSummary);
+  return nextSummary;
+}
+
 function formatMoney(value) {
   return Number(value).toLocaleString("en-US", {
     minimumFractionDigits: 2,
@@ -144,12 +174,17 @@ async function captureAdsAfterOrderScrape(scraper, summary, options = {}) {
       return;
     }
 
-    const currentStoreDate = summary?.selectedDate ?? summary?.storeDate ?? "";
+    const currentStoreDate = normalizeDate(summary?.selectedDate)
+      || normalizeDate(summary?.storeDate)
+      || formatDateInZone(new Date(), scraper.storeTimezone ?? "America/Anchorage");
     const storeDate = control.targetDate || currentStoreDate;
     const outputPath = scraper.adCapture?.outputPath;
     const activeOutputPath = storeDate && currentStoreDate && storeDate !== currentStoreDate
       ? datedAdOutputPath(outputPath, storeDate)
       : outputPath;
+    if (storeDate === currentStoreDate) {
+      await archivePreviousAdCapture(outputPath, currentStoreDate);
+    }
     const intervalMinutes = Math.max(0, Number(scraper.adCapture?.intervalMinutes ?? 0));
     const cachedResult = await readFreshAdCapture(activeOutputPath, storeDate, intervalMinutes);
     if (cachedResult) {
@@ -162,7 +197,7 @@ async function captureAdsAfterOrderScrape(scraper, summary, options = {}) {
       adAccountId: scraper.adCapture?.adAccountId,
       ctid: scraper.adCapture?.ctid,
       campaignPageUrl: scraper.adCapture?.campaignPageUrl,
-      openMissingPage: Boolean(control.targetDate),
+      openMissingPage: Boolean(scraper.adCapture?.campaignPageUrl),
       storeDate,
       orderSummaryGeneratedAt: summary?.generatedAt ?? ""
     });
@@ -199,6 +234,14 @@ function datedAdOutputPath(outputPath, storeDate) {
   if (!outputPath || !/^\d{4}-\d{2}-\d{2}$/.test(storeDate || "")) return "";
   const parsed = path.parse(outputPath);
   return path.join(parsed.dir, `${parsed.name}-${storeDate}${parsed.ext || ".json"}`);
+}
+
+async function archivePreviousAdCapture(outputPath, currentStoreDate) {
+  if (!outputPath || !currentStoreDate) return;
+  const previous = await readJson(outputPath, null);
+  const previousDate = normalizeDate(previous?.storeDate);
+  if (previous?.status !== "ok" || !previousDate || previousDate === currentStoreDate) return;
+  await writeJson(datedAdOutputPath(outputPath, previousDate), previous);
 }
 
 async function readFreshAdCapture(outputPath, storeDate, intervalMinutes) {

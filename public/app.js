@@ -1,6 +1,7 @@
-const sortBy = "count";
+﻿const sortBy = "count";
 let selectedUtmId = "";
 let selectedDate = "";
+let selectedDateManuallyChosen = false;
 let latestData = null;
 let latestAdData = null;
 let draggedMetricId = "";
@@ -11,12 +12,17 @@ const syncedAdCaptureTargetDates = {};
 let storeDropdownOpen = false;
 let storeDropdownOpenTl = null;
 let storeDropdownCloseTl = null;
+const pendingCampaignSwitches = new Set();
+const autoRuleAttemptedCampaigns = new Set();
 
 const metricOrderStorageKey = "orderDashboard.metricOrder";
 const adDataStorageKey = "orderDashboard.latestAdData";
+const autoRuleStorageKey = "orderDashboard.autoRule";
+const closedUnconvertedStorageKey = "orderDashboard.closedUnconvertedCampaigns";
+const closedConvertedStorageKey = "orderDashboard.closedConvertedCampaigns";
 
 const fallbackCurrency = {
-  sourceSymbol: "£",
+  sourceSymbol: "\u00a3",
   targetSymbol: "$",
   rate: 1.336,
   rateLabel: "1 GBP = 1.336 USD"
@@ -50,7 +56,13 @@ const elements = {
   continuingRows: document.querySelector("#continuingRows"),
   chartInfo: document.querySelector("#chartInfo"),
   orderChart: document.querySelector("#orderChart"),
+  autoRuleEnabled: document.querySelector("#autoRuleEnabled"),
+  autoRuleThreshold: document.querySelector("#autoRuleThreshold"),
+  autoRuleCostThreshold: document.querySelector("#autoRuleCostThreshold"),
+  autoRuleStatus: document.querySelector("#autoRuleStatus"),
   summaryRows: document.querySelector("#summaryRows"),
+  unconvertedInfo: document.querySelector("#unconvertedInfo"),
+  unconvertedRows: document.querySelector("#unconvertedRows"),
   scrapeInfo: document.querySelector("#scrapeInfo")
 };
 
@@ -59,9 +71,15 @@ elements.adCaptureToggle.addEventListener("click", toggleAdCapture);
 elements.testAlertSound?.addEventListener("click", testAlertSound);
 elements.storeSwitcher?.addEventListener("change", handleStoreChange);
 elements.storeDropdownTrigger?.addEventListener("click", toggleStoreDropdown);
+elements.autoRuleEnabled?.addEventListener("change", handleAutoRuleChange);
+elements.autoRuleThreshold?.addEventListener("change", handleAutoRuleChange);
+elements.autoRuleThreshold?.addEventListener("input", handleAutoRuleChange);
+elements.autoRuleCostThreshold?.addEventListener("change", handleAutoRuleChange);
+elements.autoRuleCostThreshold?.addEventListener("input", handleAutoRuleChange);
 document.addEventListener("click", closeStoreDropdownFromOutside);
 initMetricSorting();
 initMetricTilt();
+renderAutoRuleSettings();
 
 init();
 setInterval(refresh, 10000);
@@ -277,10 +295,12 @@ function handleStoreChange(event) {
   selectedStoreKey = event.target.value;
   localStorage.setItem("orderDashboard.selectedStore", selectedStoreKey);
   selectedDate = "";
+  selectedDateManuallyChosen = false;
   selectedUtmId = "";
   latestData = null;
   latestAdData = readStoredAdData();
   renderStoreDropdown();
+  renderAutoRuleSettings();
   refresh();
 }
 
@@ -407,10 +427,11 @@ async function refresh() {
     const summaryUrl = store.summaryUrl || "/data/summary.json";
     const summaryResponse = await fetch(`${summaryUrl}?t=${timestamp}`);
     const data = await summaryResponse.json();
-    const targetDate = selectedDate && data.dailySummaries?.[selectedDate]
+    const dateState = resolveDashboardDates(data, latestAdData);
+    const targetDate = selectedDateManuallyChosen && selectedDate
       ? selectedDate
-      : data.selectedDate || data.storeDate || data.availableDates?.[0] || "";
-    const adSummaryUrl = adSummaryUrlForDate(store.adSummaryUrl || "/data/ad-summary.json", targetDate, data.selectedDate || data.storeDate);
+      : dateState.currentDate;
+    const adSummaryUrl = adSummaryUrlForDate(store.adSummaryUrl || "/data/ad-summary.json", targetDate, dateState.currentDate);
     const adData = await fetchOptionalJson(`${adSummaryUrl}?t=${timestamp}`);
     const control = await fetchOptionalJson(`/api/ad-capture-control?store=${encodeURIComponent(store.key)}&t=${timestamp}`);
     renderAdCaptureControl(control);
@@ -486,18 +507,19 @@ async function testAlertSound() {
   }
 }
 
-async function syncAdCaptureTargetDate(targetDate) {
+async function syncAdCaptureTargetDate(targetDate, currentDate = "") {
   const store = activeStore();
-  if (!store?.key || !targetDate) return;
+  if (!store?.key) return;
   if (adCapturePaused) return;
-  if (syncedAdCaptureTargetDates[store.key] === targetDate) return;
-  syncedAdCaptureTargetDates[store.key] = targetDate;
+  const controlTargetDate = targetDate && targetDate !== currentDate ? targetDate : "";
+  if (syncedAdCaptureTargetDates[store.key] === controlTargetDate) return;
+  syncedAdCaptureTargetDates[store.key] = controlTargetDate;
 
   try {
     await fetch(`/api/ad-capture-control?store=${encodeURIComponent(store.key)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ targetDate, refreshRequestedAt: new Date().toISOString() })
+      body: JSON.stringify({ targetDate: controlTargetDate, refreshRequestedAt: new Date().toISOString() })
     });
   } catch {
     delete syncedAdCaptureTargetDates[store.key];
@@ -545,22 +567,32 @@ function render(data, adData = latestAdData) {
     saveStoredAdData(adData);
   }
 
-  if (!selectedDate || !(data.dailySummaries?.[selectedDate])) {
-    selectedDate = data.selectedDate || data.storeDate || data.availableDates?.[0] || "";
-  }
-  syncAdCaptureTargetDate(selectedDate);
   const displayAdData = latestAdData;
+  const dateState = resolveDashboardDates(data, displayAdData);
+  if (!selectedDateManuallyChosen || !selectedDate || !dateState.availableDates.includes(selectedDate)) {
+    selectedDate = dateState.currentDate;
+    selectedDateManuallyChosen = false;
+  }
+  syncAdCaptureTargetDate(selectedDate, dateState.currentDate);
   const activeSummary = data.dailySummaries?.[selectedDate] ?? data;
-  const isCurrentDate = selectedDate === (data.selectedDate || data.storeDate);
+  const isCurrentDate = Boolean(selectedDate) && selectedDate === dateState.currentDate;
   const totals = activeSummary.totals ?? {};
   const health = data.health ?? {};
   const last60 = isCurrentDate ? (activeSummary.last60Minutes ?? {}) : emptyLast60();
-  const currency = { ...fallbackCurrency, ...(data.currency ?? {}) };
+  const currency = normalizeCurrency(data.currency);
   const store = activeStore();
+  const adDataAvailable = isAdDataAvailable(displayAdData, selectedDate);
+  const updatedAt = health.ok ? data.generatedAt : displayAdData?.generatedAt || data.generatedAt;
 
-  elements.subtitle.textContent = `${store.name || store.key} · 店铺端 ${selectedDate || "-"} · 店铺时区 ${data.storeTimezone || "America/Anchorage"} · 更新时间 ${formatTime(data.generatedAt)} · ${currency.rateLabel}`;
-  setHealth(Boolean(health.ok), health.message || "等待首次抓取");
-  renderDateSwitcher(data.availableDates ?? [], data.selectedDate || data.storeDate);
+  elements.subtitle.textContent = `${store.name || store.key} · 店铺端 ${selectedDate || "-"} · 店铺时区 ${data.storeTimezone || "America/Anchorage"} · 更新时间 ${formatTime(updatedAt)} · ${currency.rateLabel}`;
+  if (health.ok) {
+    setHealth(true, health.message || "抓取正常");
+  } else if (adDataAvailable) {
+    setHealth(true, "广告抓取正常，当前暂无订单数据");
+  } else {
+    setHealth(false, health.message || "等待首次抓取");
+  }
+  renderDateSwitcher(dateState.availableDates, dateState.currentDate);
   elements.totalOrders.textContent = totals.orderCount ?? 0;
   elements.totalAmount.textContent = moneyGbp(totals.totalAmount ?? 0, currency);
   elements.totalUsd.textContent = moneyUsd(totals.totalAmount ?? 0, currency);
@@ -573,11 +605,15 @@ function render(data, adData = latestAdData) {
   renderContinuing(activeSummary.continuingGroups ?? [], last60, currency);
   renderOrderChart(data, activeSummary, selectedUtmId);
   const adsByCampaignId = buildAdsByCampaignId(displayAdData, selectedDate);
+  const autoRuleSettings = readAutoRuleSettings();
 
   const groups = [...(activeSummary.groups ?? [])].sort((a, b) => {
     if (sortBy === "amount") return b.totalAmount - a.totalAmount || b.orderCount - a.orderCount;
     return b.orderCount - a.orderCount || b.totalAmount - a.totalAmount;
   });
+  const unconvertedCampaigns = buildUnconvertedCampaignRows(displayAdData, selectedDate, groups);
+  renderAutoRule(displayAdData, selectedDate, groups, unconvertedCampaigns, isCurrentDate, adsByCampaignId);
+  renderUnconvertedCampaigns(displayAdData, selectedDate, groups, unconvertedCampaigns);
 
   if (!groups.length) {
     elements.summaryRows.innerHTML = '<tr><td colspan="8">暂无数据</td></tr>';
@@ -586,11 +622,14 @@ function render(data, adData = latestAdData) {
 
   elements.summaryRows.innerHTML = groups.map((group, index) => {
     const last60Group = last60.byUtmId?.[group.utmId];
-    const adRow = adsByCampaignId.get(group.utmId);
-    const orderRoi = calculateOrderRoi(group, adRow);
+    const adRow = adsByCampaignId.get(String(group.utmId));
+    const orderRoi = calculateOrderRoi(group, adRow, currency);
     const roiLevel = getRoiLevel(orderRoi);
+    const conversionCost = calculateConversionCost(adRow, group.orderCount);
+    const costLevel = getCostLevel(conversionCost, autoRuleSettings.costThreshold);
+    const rowLevel = strongestLevel(roiLevel, costLevel);
     return `
-      <tr class="${roiLevel ? `${roiLevel}RoiRow` : ""}">
+      <tr class="${rowLevel ? `${rowLevel}RoiRow` : ""}">
         <td>
           <div class="utmCell">
             <span class="rank">${String(index + 1).padStart(2, "0")}</span>
@@ -603,14 +642,317 @@ function render(data, adData = latestAdData) {
           ${renderOrderAmountWithRoi(group, currency, orderRoi)}
         </td>
         <td>${renderAdSpend(adRow)}</td>
-        <td>${renderAdStatus(adRow)}</td>
+        <td>${renderAdStatus(adRow, group.utmId)}</td>
         <td>${renderAdCpcCtr(adRow)}</td>
         <td>${renderOrderTime(group.latestOrderTime, data.storeTimezone)}</td>
-        <td>${renderStatus(group.statusCounts)}</td>
+        <td>${renderConversionCost(adRow, group.orderCount, autoRuleSettings.costThreshold)}</td>
       </tr>
     `;
   }).join("");
   bindUtmButtons(elements.summaryRows);
+  bindAdCampaignSwitches(elements.summaryRows);
+}
+
+function buildUnconvertedCampaignRows(adData, currentDate, groups) {
+  const orderedCampaignIds = new Set((groups ?? []).map((group) => String(group.utmId)));
+  const rowsByCampaignId = new Map();
+
+  for (const row of readClosedUnconvertedCampaigns(currentDate)) {
+    if (!row?.campaignId || orderedCampaignIds.has(String(row.campaignId))) continue;
+    rowsByCampaignId.set(String(row.campaignId), row);
+  }
+
+  if (isAdDataAvailable(adData, currentDate)) {
+    for (const row of adData.rows ?? []) {
+      if (!row?.campaignId) continue;
+      if (orderedCampaignIds.has(String(row.campaignId))) continue;
+      if (Number(row.spend ?? 0) <= 0 && classifyAdStatus(row.status) !== "statusActive") continue;
+      rowsByCampaignId.set(String(row.campaignId), row);
+    }
+  }
+
+  return Array.from(rowsByCampaignId.values())
+    .sort((a, b) => Number(b.spend ?? 0) - Number(a.spend ?? 0));
+}
+
+function renderUnconvertedCampaigns(adData, currentDate, groups, rows = buildUnconvertedCampaignRows(adData, currentDate, groups)) {
+  if (!elements.unconvertedInfo || !elements.unconvertedRows) return;
+
+  if (!isAdDataAvailable(adData, currentDate) && !rows.length) {
+    elements.unconvertedInfo.textContent = "等待当天广告数据";
+    elements.unconvertedRows.innerHTML = '<tr><td colspan="7">暂无广告数据</td></tr>';
+    return;
+  }
+
+  const totalSpend = rows.reduce((sum, row) => sum + Number(row.spend ?? 0), 0);
+
+  elements.unconvertedInfo.textContent = rows.length
+    ? `${currentDate || "当天"} 有投放未出单 ${rows.length} 个，合计消耗 ${moneyAd(totalSpend)}`
+    : `${currentDate || "当天"} 暂无投放未出单推广系列`;
+
+  if (!rows.length) {
+    elements.unconvertedRows.innerHTML = '<tr><td colspan="7">暂无投放未出单推广系列</td></tr>';
+    return;
+  }
+
+  const threshold = readAutoRuleSettings().threshold;
+  elements.unconvertedRows.innerHTML = rows.map((row) => {
+    const campaignId = String(row.campaignId);
+    const rowLevel = spendThresholdRowLevel(row.spend, threshold);
+    return `
+      <tr class="${rowLevel}">
+        <td>
+          <div class="utmCell">
+            <span class="rank">0单</span>
+            <button class="utmButton" data-utm-id="${escapeAttr(campaignId)}" type="button">${escapeHtml(campaignId)}</button>
+          </div>
+        </td>
+        <td class="campaignNameCell">${escapeHtml(row.campaignName || "-")}</td>
+        <td>${renderThresholdAdSpend(row, threshold)}</td>
+        <td>${renderAdStatus(row, campaignId)}</td>
+        <td>${renderAdCpcCtr(row)}</td>
+        <td>${renderAddBilling(row)}</td>
+        <td><strong>${row.budget ? moneyAd(row.budget) : "-"}</strong></td>
+      </tr>
+    `;
+  }).join("");
+  bindUtmButtons(elements.unconvertedRows);
+  bindAdCampaignSwitches(elements.unconvertedRows);
+}
+
+function autoRuleStoreKey() {
+  return `${autoRuleStorageKey}.${selectedStoreKey || "default"}`;
+}
+
+function closedUnconvertedStoreKey(date = selectedDate) {
+  return `${closedUnconvertedStorageKey}.${selectedStoreKey || "default"}.${date || "unknown"}`;
+}
+
+function closedConvertedStoreKey(date = selectedDate) {
+  return `${closedConvertedStorageKey}.${selectedStoreKey || "default"}.${date || "unknown"}`;
+}
+
+function readClosedUnconvertedCampaigns(date = selectedDate) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(closedUnconvertedStoreKey(date)) || "[]");
+    return Array.isArray(saved) ? saved.filter((row) => row?.campaignId) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveClosedUnconvertedCampaign(row, date = selectedDate, reason = "manual") {
+  if (!row?.campaignId || !date) return;
+  const campaignId = String(row.campaignId);
+  const existing = readClosedUnconvertedCampaigns(date)
+    .filter((item) => String(item.campaignId) !== campaignId);
+  const snapshot = {
+    campaignId,
+    campaignName: String(row.campaignName || ""),
+    status: "paused",
+    spend: Number(row.spend ?? 0),
+    cpc: Number(row.cpc ?? 0),
+    ctr: Number(row.ctr ?? 0),
+    budget: Number(row.budget ?? 0),
+    addBilling: Number(row.addBilling ?? 0),
+    conversions: Number(row.conversions ?? 0),
+    savedReason: reason,
+    savedAt: new Date().toISOString()
+  };
+  localStorage.setItem(closedUnconvertedStoreKey(date), JSON.stringify([snapshot, ...existing].slice(0, 200)));
+}
+
+function readClosedConvertedCampaigns(date = selectedDate) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(closedConvertedStoreKey(date)) || "[]");
+    return Array.isArray(saved) ? saved.filter((row) => row?.campaignId) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveClosedConvertedCampaign(row, date = selectedDate, reason = "manual") {
+  if (!row?.campaignId || !date) return;
+  const campaignId = String(row.campaignId);
+  const existing = readClosedConvertedCampaigns(date)
+    .filter((item) => String(item.campaignId) !== campaignId);
+  const snapshot = {
+    campaignId,
+    campaignName: String(row.campaignName || ""),
+    status: "paused",
+    spend: Number(row.spend ?? 0),
+    cpc: Number(row.cpc ?? 0),
+    ctr: Number(row.ctr ?? 0),
+    budget: Number(row.budget ?? 0),
+    addBilling: Number(row.addBilling ?? 0),
+    conversions: Number(row.conversions ?? 0),
+    savedReason: reason,
+    savedAt: new Date().toISOString()
+  };
+  localStorage.setItem(closedConvertedStoreKey(date), JSON.stringify([snapshot, ...existing].slice(0, 200)));
+}
+
+function readAutoRuleSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(autoRuleStoreKey()) || "null");
+    const threshold = Number(saved?.threshold);
+    const costThreshold = Number(saved?.costThreshold);
+    return {
+      enabled: Boolean(saved?.enabled),
+      threshold: Number.isFinite(threshold) && threshold >= 0 ? threshold : 5,
+      costThreshold: Number.isFinite(costThreshold) && costThreshold >= 0 ? costThreshold : 15
+    };
+  } catch {
+    return { enabled: false, threshold: 5, costThreshold: 15 };
+  }
+}
+
+function saveAutoRuleSettings(settings) {
+  localStorage.setItem(autoRuleStoreKey(), JSON.stringify(settings));
+}
+
+function renderAutoRuleSettings() {
+  const settings = readAutoRuleSettings();
+  if (elements.autoRuleEnabled) elements.autoRuleEnabled.checked = settings.enabled;
+  if (elements.autoRuleThreshold) elements.autoRuleThreshold.value = String(settings.threshold);
+  if (elements.autoRuleCostThreshold) elements.autoRuleCostThreshold.value = String(settings.costThreshold);
+}
+
+function handleAutoRuleChange() {
+  const threshold = Math.max(0, Number(elements.autoRuleThreshold?.value || 0));
+  const costThreshold = Math.max(0, Number(elements.autoRuleCostThreshold?.value || 0));
+  const settings = {
+    enabled: Boolean(elements.autoRuleEnabled?.checked),
+    threshold: Number.isFinite(threshold) ? threshold : 5,
+    costThreshold: Number.isFinite(costThreshold) ? costThreshold : 15
+  };
+  saveAutoRuleSettings(settings);
+  renderAutoRuleSettings();
+  if (latestData) render(latestData, latestAdData);
+}
+
+function renderAutoRule(adData, currentDate, groups, unconvertedCampaigns, isCurrentDate, adsByCampaignId = new Map()) {
+  if (!elements.autoRuleStatus) return;
+
+  const settings = readAutoRuleSettings();
+  const threshold = settings.threshold;
+  const costThreshold = settings.costThreshold;
+  const unconvertedCandidates = unconvertedCampaigns.filter((row) => (
+    classifyAdStatus(row.status) === "statusActive" && Number(row.spend ?? 0) >= threshold
+  ));
+  const convertedCandidates = (groups ?? [])
+    .map((group) => {
+      const adRow = adsByCampaignId.get(String(group.utmId));
+      return {
+        group,
+        adRow,
+        cost: calculateConversionCost(adRow, group.orderCount)
+      };
+    })
+    .filter((item) => (
+      item.adRow?.campaignId
+      && classifyAdStatus(item.adRow.status) === "statusActive"
+      && item.cost !== null
+      && item.cost >= costThreshold
+    ));
+
+  if (!settings.enabled) {
+    elements.autoRuleStatus.textContent = `未启用：当“未出单消耗 ≥ ${moneyAd(threshold)}”或“已出单单次成本 ≥ ${moneyAd(costThreshold)} / 单”时自动关闭`;
+    return;
+  }
+
+  if (!isCurrentDate) {
+    elements.autoRuleStatus.textContent = `历史日期只展示警示，不自动关停；触发条件：未出单消耗 ≥ ${moneyAd(threshold)}，已出单单次成本 ≥ ${moneyAd(costThreshold)} / 单`;
+    return;
+  }
+
+  if (!isAdDataAvailable(adData, currentDate)) {
+    elements.autoRuleStatus.textContent = "等待当天广告数据后执行自动规则";
+    return;
+  }
+
+  elements.autoRuleStatus.textContent = `已启用：未出单消耗 ≥ ${moneyAd(threshold)} 的待处理 ${unconvertedCandidates.length} 个；已出单单次成本 ≥ ${moneyAd(costThreshold)} / 单的待处理 ${convertedCandidates.length} 个`;
+
+  unconvertedCandidates.forEach((row) => {
+    void autoDisableCampaign(row, currentDate, threshold);
+  });
+  convertedCandidates.forEach((item) => {
+    void autoDisableConvertedCampaign(item.group, item.adRow, currentDate, costThreshold, item.cost);
+  });
+}
+
+async function autoDisableCampaign(row, currentDate, threshold) {
+  const campaignId = String(row.campaignId || "");
+  if (!campaignId) return;
+
+  const storeKey = activeStore().key;
+  const operationKey = `${storeKey}:${campaignId}`;
+  const attemptKey = `${operationKey}:${currentDate}:${threshold}`;
+  if (pendingCampaignSwitches.has(operationKey) || autoRuleAttemptedCampaigns.has(attemptKey)) return;
+
+  autoRuleAttemptedCampaigns.add(attemptKey);
+  pendingCampaignSwitches.add(operationKey);
+
+  try {
+    await setCampaignEnabled(campaignId, false, storeKey);
+    saveClosedUnconvertedCampaign(row, currentDate, "auto-rule");
+    const adRow = selectedStoreKey === storeKey
+      ? latestAdData?.rows?.find((item) => String(item.campaignId) === campaignId)
+      : null;
+    if (adRow) {
+      adRow.status = "paused";
+      if (adRow.raw) adRow.raw.campaign_status = adRow.status;
+      latestAdData.generatedAt = new Date().toISOString();
+      saveStoredAdData(latestAdData);
+    }
+    if (elements.autoRuleStatus) {
+      elements.autoRuleStatus.textContent = `自动规则已关闭推广系列 ${campaignId}：消耗 ${moneyAd(row.spend ?? 0)}，当天未出单`;
+    }
+  } catch (error) {
+    if (elements.autoRuleStatus) {
+      elements.autoRuleStatus.textContent = `自动关闭 ${campaignId} 失败：${error.message}`;
+    }
+  } finally {
+    pendingCampaignSwitches.delete(operationKey);
+    if (selectedStoreKey === storeKey && latestData) render(latestData, latestAdData);
+  }
+}
+
+async function autoDisableConvertedCampaign(group, row, currentDate, threshold, cost) {
+  const campaignId = String(group?.utmId || row?.campaignId || "");
+  if (!campaignId) return;
+
+  const storeKey = activeStore().key;
+  const operationKey = `${storeKey}:${campaignId}`;
+  const attemptKey = `${operationKey}:${currentDate}:converted:${threshold}`;
+  if (pendingCampaignSwitches.has(operationKey) || autoRuleAttemptedCampaigns.has(attemptKey)) return;
+
+  autoRuleAttemptedCampaigns.add(attemptKey);
+  pendingCampaignSwitches.add(operationKey);
+
+  try {
+    await setCampaignEnabled(campaignId, false, storeKey);
+    saveClosedConvertedCampaign({ ...row, campaignId }, currentDate, "auto-rule-cost");
+    const adRow = selectedStoreKey === storeKey
+      ? latestAdData?.rows?.find((item) => String(item.campaignId) === campaignId)
+      : null;
+    if (adRow) {
+      adRow.status = "paused";
+      if (adRow.raw) adRow.raw.campaign_status = adRow.status;
+      latestAdData.generatedAt = new Date().toISOString();
+      saveStoredAdData(latestAdData);
+    }
+    if (elements.autoRuleStatus) {
+      elements.autoRuleStatus.textContent = `自动规则已关闭推广系列 ${campaignId}：单次成本 ${moneyAd(cost)}，阈值 ${moneyAd(threshold)}`;
+    }
+  } catch (error) {
+    if (elements.autoRuleStatus) {
+      elements.autoRuleStatus.textContent = `自动关闭 ${campaignId} 失败：${error.message}`;
+    }
+  } finally {
+    pendingCampaignSwitches.delete(operationKey);
+    if (selectedStoreKey === storeKey && latestData) render(latestData, latestAdData);
+  }
 }
 
 function renderDateSwitcher(dates, currentDate) {
@@ -643,10 +985,57 @@ function renderProfitMetric(totals, currency, adData, currentDate) {
 }
 
 function buildAdsByCampaignId(adData, currentDate) {
-  if (!isAdDataAvailable(adData, currentDate)) return new Map();
-  return new Map((adData.rows ?? [])
-    .filter((row) => row.campaignId)
-    .map((row) => [String(row.campaignId), row]));
+  const rowsByCampaignId = new Map();
+  for (const row of readClosedConvertedCampaigns(currentDate)) {
+    if (!row?.campaignId) continue;
+    rowsByCampaignId.set(String(row.campaignId), row);
+  }
+  if (isAdDataAvailable(adData, currentDate)) {
+    for (const row of adData.rows ?? []) {
+      if (!row?.campaignId) continue;
+      rowsByCampaignId.set(String(row.campaignId), row);
+    }
+  }
+  return rowsByCampaignId;
+}
+
+function resolveDashboardDates(data, adData) {
+  const summaryDates = Array.isArray(data.availableDates)
+    ? data.availableDates.filter(isDateString)
+    : [];
+  const summaryCurrentDate = [data.selectedDate, data.storeDate, summaryDates[0]]
+    .find(isDateString) || "";
+  const adDate = isDateString(adData?.storeDate) ? adData.storeDate : "";
+  const clockDate = currentDateInTimeZone(data.storeTimezone || "America/Anchorage");
+  const currentDate = clockDate || summaryCurrentDate || adDate;
+  const availableDates = currentDate ? buildRecentDates(currentDate, 7) : [...summaryDates];
+  return { currentDate, availableDates };
+}
+
+function isDateString(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
+}
+
+function currentDateInTimeZone(timeZone) {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).formatToParts(new Date());
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return `${values.year}-${values.month}-${values.day}`;
+  } catch {
+    return "";
+  }
+}
+
+function buildRecentDates(currentDate, count) {
+  const [year, month, day] = currentDate.split("-").map(Number);
+  return Array.from({ length: count }, (_, index) => (
+    new Date(Date.UTC(year, month - 1, day - index)).toISOString().slice(0, 10)
+  ));
 }
 
 function isAdDataAvailable(adData, currentDate) {
@@ -655,11 +1044,11 @@ function isAdDataAvailable(adData, currentDate) {
   return Array.isArray(adData.rows);
 }
 
-function calculateOrderRoi(group, adRow) {
-  const orderAmountGbp = Number(group?.totalAmount ?? 0);
+function calculateOrderRoi(group, adRow, currency) {
+  const orderAmountUsd = Number(group?.totalAmount ?? 0) * Number(currency?.rate || 0);
   const adSpend = Number(adRow?.spend ?? 0);
-  if (!Number.isFinite(orderAmountGbp) || !Number.isFinite(adSpend) || adSpend <= 0) return null;
-  return orderAmountGbp / adSpend;
+  if (!Number.isFinite(orderAmountUsd) || !Number.isFinite(adSpend) || adSpend <= 0) return null;
+  return orderAmountUsd / adSpend;
 }
 
 function renderOrderAmountWithRoi(group, currency, orderRoi) {
@@ -675,8 +1064,30 @@ function renderOrderAmountWithRoi(group, currency, orderRoi) {
 
 function getRoiLevel(orderRoi) {
   if (orderRoi === null) return "";
-  if (orderRoi < 2) return "low";
-  if (orderRoi < 2.2) return "warning";
+  if (orderRoi < 2.2) return "low";
+  if (orderRoi < 2.5) return "warning";
+  return "";
+}
+
+function calculateConversionCost(adRow, orderCount) {
+  const adSpend = Number(adRow?.spend);
+  const orders = Number(orderCount);
+  if (!adRow || !Number.isFinite(adSpend) || !Number.isFinite(orders) || orders <= 0) return null;
+  return adSpend / orders;
+}
+
+function getCostLevel(cost, threshold) {
+  const target = Number(threshold);
+  if (cost === null || !Number.isFinite(target) || target <= 0) return "";
+  const ratio = Number(cost) / target;
+  if (ratio >= 1) return "low";
+  if (ratio >= 0.8) return "warning";
+  return "";
+}
+
+function strongestLevel(...levels) {
+  if (levels.includes("low")) return "low";
+  if (levels.includes("warning")) return "warning";
   return "";
 }
 
@@ -690,10 +1101,54 @@ function renderAdSpend(adRow) {
   `;
 }
 
-function renderAdStatus(adRow) {
+function renderThresholdAdSpend(adRow, threshold) {
+  if (!adRow) return "-";
+  const spend = Number(adRow.spend ?? 0);
+  const level = spendThresholdLevel(spend, threshold);
+  return `
+    <div class="moneyStack adSpendStack ${level}">
+      <strong>${moneyAd(spend)}</strong>
+      <small>预算 ${adRow.budget ? moneyAd(adRow.budget) : "-"}</small>
+    </div>
+  `;
+}
+
+function spendThresholdLevel(spend, threshold) {
+  const target = Number(threshold);
+  if (!Number.isFinite(target) || target <= 0) return "thresholdDanger";
+  const ratio = Number(spend || 0) / target;
+  if (ratio >= 1) return "lowRoiAmount";
+  if (ratio >= 0.8) return "warningRoiAmount";
+  return "";
+}
+
+function spendThresholdRowLevel(spend, threshold) {
+  const target = Number(threshold);
+  if (!Number.isFinite(target) || target <= 0) return "lowRoiRow";
+  const ratio = Number(spend || 0) / target;
+  if (ratio >= 1) return "lowRoiRow";
+  if (ratio >= 0.8) return "warningRoiRow";
+  return "";
+}
+
+function renderAdStatus(adRow, campaignId) {
   const status = adRow?.status || "无数据";
-  const statusLevel = classifyAdStatus(status);
-  return `<span class="adStatusPill ${escapeAttr(statusLevel)}" title="${escapeAttr(status)}" aria-label="${escapeAttr(status)}"><span class="adStatusDot"></span></span>`;
+  const enabled = classifyAdStatus(status) === "statusActive";
+  const operationKey = campaignOperationKey(campaignId);
+  const pending = pendingCampaignSwitches.has(operationKey);
+  const disabled = !adRow || pending;
+  return `
+    <button
+      class="adCampaignSwitch ${enabled ? "isOn" : "isOff"} ${pending ? "isPending" : ""}"
+      type="button"
+      role="switch"
+      aria-checked="${enabled}"
+      aria-label="${escapeAttr(`${enabled ? "关闭" : "开启"}推广系列 ${campaignId}`)}"
+      title="${escapeAttr(status)}"
+      data-campaign-switch="${escapeAttr(campaignId)}"
+      ${disabled ? "disabled" : ""}
+    ><span class="adCampaignSwitchHandle"></span></button>
+  `;
 }
 
 function classifyAdStatus(status) {
@@ -712,11 +1167,95 @@ function renderAdCpcCtr(adRow) {
   `;
 }
 
+function renderConversionCost(adRow, orderCount, threshold) {
+  const cost = calculateConversionCost(adRow, orderCount);
+  if (cost === null) return "-";
+  const level = getCostLevel(cost, threshold);
+  return `
+    <div class="moneyStack conversionCostStack ${level ? `${level}RoiAmount` : ""}">
+      <strong class="conversionCost">${moneyAd(cost)}</strong>
+    </div>
+  `;
+}
+
+function renderAddBilling(adRow) {
+  if (!adRow) return "-";
+  return `<strong>${Number(adRow.addBilling ?? 0)}</strong>`;
+}
+
+function campaignOperationKey(campaignId) {
+  return `${selectedStoreKey}:${campaignId}`;
+}
+
+function bindAdCampaignSwitches(root) {
+  root.querySelectorAll("[data-campaign-switch]").forEach((button) => {
+    button.addEventListener("click", () => toggleAdCampaignStatus(button));
+  });
+}
+
+function campaignHasOrders(campaignId, date = selectedDate) {
+  const summary = latestData?.dailySummaries?.[date] ?? latestData;
+  return (summary?.groups ?? []).some((group) => String(group.utmId) === String(campaignId));
+}
+
+async function toggleAdCampaignStatus(button) {
+  const campaignId = button.dataset.campaignSwitch;
+  const storeKey = activeStore().key;
+  const enabled = button.getAttribute("aria-checked") !== "true";
+  const action = enabled ? "开启" : "关闭";
+  if (!window.confirm(`确认${action}推广系列 ${campaignId}？`)) return;
+
+  const operationKey = `${storeKey}:${campaignId}`;
+  pendingCampaignSwitches.add(operationKey);
+  button.disabled = true;
+  button.classList.add("isPending");
+
+  try {
+    await setCampaignEnabled(campaignId, enabled, storeKey);
+    const adRow = selectedStoreKey === storeKey
+      ? latestAdData?.rows?.find((row) => String(row.campaignId) === campaignId)
+      : null;
+    if (adRow) {
+      adRow.status = enabled ? "active" : "paused";
+      if (adRow.raw) adRow.raw.campaign_status = adRow.status;
+      latestAdData.generatedAt = new Date().toISOString();
+      saveStoredAdData(latestAdData);
+      if (!enabled) {
+        if (campaignHasOrders(campaignId, selectedDate)) {
+          saveClosedConvertedCampaign(adRow, selectedDate, "manual");
+        } else {
+          saveClosedUnconvertedCampaign(adRow, selectedDate, "manual");
+        }
+      }
+    }
+  } catch (error) {
+    window.alert(`${action}失败：${error.message}`);
+  } finally {
+    pendingCampaignSwitches.delete(operationKey);
+    if (selectedStoreKey === storeKey && latestData) render(latestData, latestAdData);
+  }
+}
+
+async function setCampaignEnabled(campaignId, enabled, storeKey = activeStore().key) {
+  const response = await fetch(`/api/ad-campaign-status?store=${encodeURIComponent(storeKey)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ campaignId, enabled })
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || "TikTok 未确认状态切换");
+  }
+  return result;
+}
+
 function handleDateClick(event) {
   const button = event.target.closest("[data-date]");
   if (!button) return;
   selectedDate = button.dataset.date;
-  syncAdCaptureTargetDate(selectedDate);
+  const currentDate = resolveDashboardDates(latestData ?? {}, latestAdData).currentDate;
+  selectedDateManuallyChosen = selectedDate !== currentDate;
+  syncAdCaptureTargetDate(selectedDate, currentDate);
   refresh();
 }
 
@@ -734,7 +1273,7 @@ function renderContinuing(groups, last60, currency) {
       <article class="continuingCard">
         <div class="continuingHead">
           <button class="utmButton" data-utm-id="${escapeAttr(group.utmId)}" type="button">${escapeHtml(group.utmId)}</button>
-          <strong>店铺累计 ${cumulativeOrders}单</strong>
+          <strong>店铺累计 ${cumulativeOrders} 单</strong>
         </div>
         <div class="continuingStats">
           <div>
@@ -958,11 +1497,11 @@ function renderStatus(statusCounts = {}) {
 }
 
 function moneyGbp(value, currency) {
-  return `${currency.sourceSymbol}${formatNumber(value)}`;
+  return `${currency.sourceSymbol || "\u00a3"}${formatNumber(value)}`;
 }
 
 function moneyUsd(value, currency) {
-  return `${currency.targetSymbol}${formatNumber(Number(value) * Number(currency.rate || 0))}`;
+  return `${currency.targetSymbol || "$"}${formatNumber(Number(value) * Number(currency.rate || 0))}`;
 }
 
 function moneyAd(value) {
@@ -970,7 +1509,18 @@ function moneyAd(value) {
 }
 
 function moneyCny(value) {
-  return `¥${formatNumber(value)}`;
+  return `\u00a5${formatNumber(value)}`;
+}
+
+function normalizeCurrency(currency = {}) {
+  const sourceSymbol = String(currency.sourceSymbol || "").trim();
+  const targetSymbol = String(currency.targetSymbol || "").trim();
+  return {
+    ...fallbackCurrency,
+    ...currency,
+    sourceSymbol: sourceSymbol === "\u00a3" ? sourceSymbol : fallbackCurrency.sourceSymbol,
+    targetSymbol: targetSymbol === "$" ? targetSymbol : fallbackCurrency.targetSymbol
+  };
 }
 
 function formatNumber(value) {

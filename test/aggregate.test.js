@@ -183,3 +183,18 @@ test("builds seven store-date summaries and keeps historical realtime empty", ()
   assert.equal(summary.dailySummaries["2026-07-05"].last60Minutes.orderCount, 0);
   assert.equal(summary.dailySummaries["2026-07-06"].last60Minutes.orderCount, 1);
 });
+
+test("keeps a seven-day calendar when a new store has no orders", () => {
+  const summary = buildStoreDashboardSummary([], {
+    storeDate: "2026-08-07",
+    timeZone: "America/Anchorage",
+    now: new Date("2026-08-07T01:00:00-08:00"),
+    days: 7
+  });
+
+  assert.equal(summary.storeDate, "2026-08-07");
+  assert.equal(summary.selectedDate, "2026-08-07");
+  assert.equal(summary.availableDates.length, 7);
+  assert.equal(summary.dailySummaries["2026-08-07"].totals.orderCount, 0);
+  assert.equal(summary.dailySummaries["2026-08-01"].totals.orderCount, 0);
+});

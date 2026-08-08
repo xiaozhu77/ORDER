@@ -33,6 +33,121 @@ export async function captureAdsPowerAdData(options = {}) {
   return run;
 }
 
+export async function setAdsPowerCampaignEnabled(options = {}) {
+  const run = captureQueue.then(() => setAdsPowerCampaignEnabledOnce(options));
+  captureQueue = run.catch(() => {});
+  return run;
+}
+
+async function setAdsPowerCampaignEnabledOnce(options = {}) {
+  const campaignId = normalizeText(options.campaignId);
+  if (!/^\d+$/.test(campaignId)) {
+    return { ok: false, reason: "推广系列 ID 无效" };
+  }
+
+  const logDirPath = path.resolve(options.logDirPath ?? DEFAULT_LOG_PATH);
+  const debuggerEndpoint = await getLatestDebuggerEndpoint(logDirPath);
+  if (!debuggerEndpoint) {
+    return { ok: false, reason: "未找到 AdsPower 当前浏览器调试地址" };
+  }
+
+  const pages = await listDevtoolsPages(debuggerEndpoint, options.connectTimeoutMs ?? 5000);
+  const pageInfo = pages.find((page) => page.type === "page" && isTargetCampaignPage(page.url, options.adAccountId));
+  if (!pageInfo?.webSocketDebuggerUrl) {
+    return { ok: false, reason: "未找到当前广告账户的推广系列页面" };
+  }
+
+  const desiredEnabled = Boolean(options.enabled);
+  const readStateExpression = campaignSwitchStateExpression(campaignId);
+  const initialState = await evaluatePageCdp(
+    pageInfo.webSocketDebuggerUrl,
+    readStateExpression,
+    options.readTimeoutMs ?? 5000
+  );
+
+  if (!initialState?.found) {
+    return { ok: false, reason: `广告页面当前未显示推广系列 ${campaignId}` };
+  }
+  if (initialState.disabled) {
+    return { ok: false, reason: `推广系列 ${campaignId} 的广告开关当前不可操作` };
+  }
+  if (initialState.enabled === desiredEnabled) {
+    return {
+      ok: true,
+      changed: false,
+      campaignId,
+      enabled: desiredEnabled,
+      status: initialState.status || (desiredEnabled ? "投放中" : "已暂停")
+    };
+  }
+
+  const clickResult = await evaluatePageCdp(
+    pageInfo.webSocketDebuggerUrl,
+    campaignSwitchClickExpression(campaignId),
+    options.readTimeoutMs ?? 5000
+  );
+  if (!clickResult?.clicked) {
+    return { ok: false, reason: clickResult?.reason || `无法点击推广系列 ${campaignId} 的广告开关` };
+  }
+
+  const deadline = Date.now() + Math.max(8000, Number(options.verifyTimeoutMs ?? 15000));
+  let verifiedState = null;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    verifiedState = await evaluatePageCdp(
+      pageInfo.webSocketDebuggerUrl,
+      readStateExpression,
+      options.readTimeoutMs ?? 5000
+    ).catch(() => null);
+    if (verifiedState?.found && verifiedState.enabled === desiredEnabled) break;
+  }
+
+  if (!verifiedState?.found || verifiedState.enabled !== desiredEnabled) {
+    return { ok: false, reason: `TikTok 未确认推广系列 ${campaignId} 的状态已切换` };
+  }
+
+  return {
+    ok: true,
+    changed: true,
+    campaignId,
+    enabled: desiredEnabled,
+    status: verifiedState.status || (desiredEnabled ? "投放中" : "已暂停")
+  };
+}
+
+function campaignSwitchStateExpression(campaignId) {
+  return `(() => {
+    const campaignId = ${JSON.stringify(campaignId)};
+    const cell = document.querySelector('[slot="cell-' + campaignId + '_switch"]');
+    const control = cell?.querySelector('[role="switch"]');
+    const button = control?.shadowRoot?.querySelector('button[role="switch"]') || control;
+    const statusCell = document.querySelector('[slot="cell-' + campaignId + '_campaign_status"]');
+    if (!control || !button) return { found: false };
+    const checked = button.getAttribute('aria-checked');
+    return {
+      found: true,
+      enabled: checked === 'true' || control.checked === true,
+      disabled: Boolean(control.disabled || button.disabled || button.getAttribute('aria-disabled') === 'true'),
+      status: (statusCell?.textContent || '').replace(/\\s+/g, ' ').trim()
+    };
+  })()`;
+}
+
+function campaignSwitchClickExpression(campaignId) {
+  return `(() => {
+    const campaignId = ${JSON.stringify(campaignId)};
+    const cell = document.querySelector('[slot="cell-' + campaignId + '_switch"]');
+    const control = cell?.querySelector('[role="switch"]');
+    const button = control?.shadowRoot?.querySelector('button[role="switch"]') || control;
+    if (!control || !button) return { clicked: false, reason: '未找到 TikTok 广告开关' };
+    if (control.disabled || button.disabled || button.getAttribute('aria-disabled') === 'true') {
+      return { clicked: false, reason: 'TikTok 广告开关当前不可操作' };
+    }
+    button.click();
+    return { clicked: true };
+  })()`;
+}
+
 async function captureAdsPowerAdDataOnce(options = {}) {
   const logDirPath = path.resolve(options.logDirPath ?? DEFAULT_LOG_PATH);
   const debuggerEndpoint = await getLatestDebuggerEndpoint(logDirPath);
@@ -57,7 +172,7 @@ async function captureAdsPowerAdDataOnce(options = {}) {
       readTimeoutMs: options.readTimeoutMs
     });
 
-    if (!browserResult.ok || !browserResult.rows?.length) {
+    if (!browserResult.ok) {
       result = buildResult({
         status: "skip",
         storeDate: options.storeDate,
@@ -306,11 +421,8 @@ async function readAdsPowerCampaignRows(debuggerEndpoint, options = {}) {
     });
     const pageTotalSpend = await page.evaluate(() => {
       const table = document.querySelector("ks-virtual-table-1-1-1n, ks-virtual-table, .KsTable") || document.body;
-      const moneyElements = Array.from(table.querySelectorAll("ks-text-1-1-1n, span, div"))
-        .filter((element) => !element.closest("[slot^='cell-']"))
-        .map((element) => (element.textContent || "").replace(/\s+/g, " ").trim())
-        .filter((text) => /^\d[\d,]*(?:\.\d+)?\s*USD$/i.test(text));
-      return moneyElements[0] || "";
+      const spendFooter = table.querySelector('[slot="footer-stat_cost"]');
+      return (spendFooter?.textContent || "").replace(/\s+/g, " ").trim();
     });
 
     return {
@@ -384,14 +496,11 @@ async function readAdsPowerCampaignRowsViaPageCdp(debuggerEndpoint, options = {}
       grouped[rowId][field] = (element.textContent || "").replace(/\\s+/g, " ").trim();
     }
     const table = document.querySelector("ks-virtual-table-1-1-1n, ks-virtual-table, .KsTable") || document.body;
-    const moneyElements = Array.from(table.querySelectorAll("ks-text-1-1-1n, span, div"))
-      .filter((element) => !element.closest("[slot^='cell-']"))
-      .map((element) => (element.textContent || "").replace(/\\s+/g, " ").trim())
-      .filter((text) => /^\\d[\\d,]*(?:\\.\\d+)?\\s*USD$/i.test(text));
+    const spendFooter = table.querySelector('[slot="footer-stat_cost"]');
     return {
       url: location.href,
       rows: Object.values(grouped),
-      pageTotalSpend: moneyElements[0] || ""
+      pageTotalSpend: (spendFooter?.textContent || "").replace(/\\s+/g, " ").trim()
     };
   })()`, options.readTimeoutMs ?? 5000);
   let data;

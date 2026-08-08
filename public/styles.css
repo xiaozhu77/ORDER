@@ -4,6 +4,11 @@
   --panel: #191d25;
   --panel-soft: #11151d;
   --panel-elevated: #20242d;
+  --glass-panel: rgba(17, 21, 29, 0.52);
+  --glass-panel-soft: rgba(8, 11, 16, 0.46);
+  --glass-panel-elevated: rgba(32, 38, 50, 0.64);
+  --glass-control: rgba(10, 14, 21, 0.56);
+  --glass-blur: blur(16px) saturate(128%);
   --border: rgba(140, 153, 190, 0.1);
   --border-strong: rgba(140, 153, 190, 0.2);
   --text: #ffffff;
@@ -52,6 +57,10 @@ select {
   z-index: 0;
   overflow: hidden;
   pointer-events: none;
+  background:
+    radial-gradient(circle at 18% 12%, rgba(87, 111, 148, 0.14), transparent 30%),
+    radial-gradient(circle at 82% 72%, rgba(79, 92, 126, 0.12), transparent 34%),
+    #020304;
 }
 
 .dynamicBackground::after {
@@ -60,7 +69,7 @@ select {
   inset: 0;
   background:
     radial-gradient(circle at 48% 44%, rgba(255, 255, 255, 0.035), transparent 20%),
-    rgba(0, 0, 0, 0.34);
+    rgba(0, 0, 0, 0.18);
 }
 
 .orbit {
@@ -259,8 +268,10 @@ select {
   padding: 18px;
   border: 1px solid var(--border);
   border-radius: 14px;
-  background: var(--panel-soft);
-  box-shadow: var(--shadow);
+  background: var(--glass-panel-soft);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035), 0 18px 50px rgba(0, 0, 0, 0.18);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
 }
 
 .mainContent {
@@ -332,11 +343,14 @@ h2 {
 .metrics article,
 .continuingSection,
 .chartSection,
+.autoRuleSection,
 .tableSection {
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: var(--panel);
-  box-shadow: var(--shadow);
+  background: linear-gradient(145deg, rgba(30, 36, 48, 0.58), var(--glass-panel));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035), 0 14px 34px rgba(0, 0, 0, 0.12);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
 }
 
 .filterPanel {
@@ -367,7 +381,9 @@ h2 {
   border: 1px solid var(--border-strong);
   padding: 10px 11px;
   color: var(--text);
-  background: #11151d;
+  background: var(--glass-control);
+  -webkit-backdrop-filter: blur(12px) saturate(120%);
+  backdrop-filter: blur(12px) saturate(120%);
   outline: none;
 }
 
@@ -390,7 +406,9 @@ h2 {
   border-radius: 9px;
   padding: 10px 11px;
   color: var(--text);
-  background: #11151d;
+  background: var(--glass-control);
+  -webkit-backdrop-filter: blur(12px) saturate(120%);
+  backdrop-filter: blur(12px) saturate(120%);
   cursor: pointer;
   outline: none;
 }
@@ -398,7 +416,7 @@ h2 {
 .storeDropdownTrigger:hover,
 .storeDropdownTrigger:focus {
   border-color: rgba(143, 92, 247, 0.5);
-  background: #171b25;
+  background: rgba(30, 36, 48, 0.7);
 }
 
 .storeDropdownArrow {
@@ -417,8 +435,10 @@ h2 {
   border: 1px solid var(--border-strong);
   border-radius: 12px;
   padding: 7px;
-  background: #11151d;
+  background: rgba(10, 14, 21, 0.76);
   box-shadow: 0 18px 42px rgba(0, 0, 0, 0.42);
+  -webkit-backdrop-filter: blur(18px) saturate(132%);
+  backdrop-filter: blur(18px) saturate(132%);
   transform-origin: top center;
   pointer-events: none;
 }
@@ -484,7 +504,7 @@ h2 {
   border: 1px solid var(--border);
   padding: 8px 9px;
   color: var(--muted-strong);
-  background: #11151d;
+  background: rgba(10, 14, 21, 0.52);
   cursor: pointer;
   font-size: 12px;
   font-weight: 700;
@@ -492,7 +512,7 @@ h2 {
 
 .dateSwitcher button:hover {
   border-color: var(--border-strong);
-  background: #20242d;
+  background: rgba(38, 44, 57, 0.68);
 }
 
 .dateSwitcher button.active {
@@ -531,7 +551,7 @@ h2 {
   border: 1px solid var(--border-strong);
   padding: 10px 12px;
   color: var(--muted-strong);
-  background: #11151d;
+  background: rgba(10, 14, 21, 0.52);
   cursor: pointer;
   font-weight: 750;
 }
@@ -586,7 +606,7 @@ h2 {
   display: grid;
   gap: 5px;
   padding: 13px 14px;
-  background: #151923;
+  background: rgba(17, 22, 31, 0.38);
 }
 
 .sideStats span,
@@ -632,7 +652,7 @@ h2 {
 
 .metrics article.dropTarget {
   border-color: rgba(92, 200, 255, 0.45);
-  background: var(--panel-elevated);
+  background: var(--glass-panel-elevated);
 }
 
 .metrics span {
@@ -665,8 +685,62 @@ h2 {
 
 .continuingSection,
 .chartSection,
+.autoRuleSection,
 .tableSection {
   overflow: hidden;
+}
+
+.autoRuleBody {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 14px 16px 16px;
+}
+
+.autoRuleToggle,
+.autoRuleThreshold {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 190px;
+  color: var(--muted-strong);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.conversionCostStack {
+  display: inline-grid;
+}
+
+.autoRuleToggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--success);
+}
+
+.autoRuleThreshold input {
+  width: 96px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--text);
+  background: var(--glass-control);
+  outline: none;
+}
+
+.autoRuleThreshold input:focus {
+  border-color: rgba(0, 212, 106, 0.45);
+}
+
+.autoRuleThreshold strong {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.unconvertedSection table {
+  min-width: 980px;
 }
 
 .sectionTitle {
@@ -700,7 +774,9 @@ h2 {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 12px;
-  background: #141821;
+  background: rgba(15, 20, 29, 0.42);
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
+  backdrop-filter: blur(10px) saturate(120%);
 }
 
 .continuingHead {
@@ -837,12 +913,18 @@ td {
   text-align: left;
 }
 
+.tableSection th.campaignIdHeader {
+  text-align: center;
+}
+
 th {
   position: sticky;
   top: 0;
   z-index: 1;
   color: var(--muted);
-  background: #151923;
+  background: rgba(15, 20, 29, 0.76);
+  -webkit-backdrop-filter: blur(14px) saturate(122%);
+  backdrop-filter: blur(14px) saturate(122%);
   font-size: 12px;
   font-weight: 750;
 }
@@ -885,6 +967,13 @@ tbody tr.warningRoiRow:hover {
   gap: 10px;
 }
 
+.campaignNameCell {
+  max-width: 280px;
+  color: var(--muted-strong);
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+
 .utmButton {
   border: 0;
   padding: 0;
@@ -911,7 +1000,7 @@ tbody tr.warningRoiRow:hover {
   border: 1px solid var(--border);
   border-radius: 7px;
   color: var(--muted);
-  background: #11151d;
+  background: rgba(10, 14, 21, 0.5);
   font-size: 12px;
   font-weight: 800;
 }
@@ -958,35 +1047,71 @@ tbody tr.warningRoiRow:hover {
   color: #eef2ff;
 }
 
-.adStatusPill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
+.adSpendStack.lowRoiAmount strong,
+.adSpendStack.lowRoiAmount small {
+  color: #ff6b7d;
 }
 
-.adStatusDot {
-  width: 7px;
-  height: 7px;
+.adSpendStack.warningRoiAmount strong,
+.adSpendStack.warningRoiAmount small {
+  color: #ffcf70;
+}
+
+.adCampaignSwitch {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid rgba(176, 186, 202, 0.16);
   border-radius: 999px;
-  background: #6f7b91;
-  box-shadow: 0 0 0 3px rgba(139, 152, 170, 0.08);
-  flex: 0 0 auto;
+  background: #343b47;
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, opacity 160ms ease;
 }
 
-.adStatusPill.statusActive {
-  background: rgba(0, 212, 106, 0.07);
-}
-
-.adStatusPill.statusActive .adStatusDot {
+.adCampaignSwitch.isOn {
   background: var(--success);
-  animation: adStatusPulse 1.8s ease-in-out infinite;
+  border-color: rgba(0, 212, 106, 0.46);
 }
 
-.adStatusPill.statusIdle {
-  background: rgba(139, 152, 170, 0.055);
+.adCampaignSwitchHandle {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #c6ccd5;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.38);
+  transition: transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1), background 160ms ease;
+}
+
+.adCampaignSwitch.isOn .adCampaignSwitchHandle {
+  transform: translateX(16px);
+  background: #f0f2f5;
+}
+
+.adCampaignSwitch:hover:not(:disabled) {
+  border-color: rgba(220, 225, 234, 0.38);
+}
+
+.adCampaignSwitch:focus-visible {
+  outline: 2px solid rgba(184, 193, 207, 0.55);
+  outline-offset: 2px;
+}
+
+.adCampaignSwitch:disabled {
+  cursor: wait;
+  opacity: 0.48;
+}
+
+.adCampaignSwitch.isPending {
+  animation: campaignSwitchPending 900ms ease-in-out infinite alternate;
+}
+
+.conversionCost {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
 }
 
 .statusPill {
@@ -1000,17 +1125,9 @@ tbody tr.warningRoiRow:hover {
   font-size: 12px;
 }
 
-@keyframes adStatusPulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 3px rgba(0, 212, 106, 0.1);
-    transform: scale(1);
-  }
-
-  50% {
-    box-shadow: 0 0 0 5px rgba(0, 212, 106, 0.18);
-    transform: scale(1.12);
-  }
+@keyframes campaignSwitchPending {
+  from { opacity: 0.45; }
+  to { opacity: 0.85; }
 }
 
 @media (max-width: 1120px) {
@@ -1047,6 +1164,11 @@ tbody tr.warningRoiRow:hover {
 
   .insightGrid {
     grid-template-columns: 1fr;
+  }
+
+  .autoRuleBody {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 
